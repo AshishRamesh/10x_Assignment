@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Path Smoother Node for ROS2
-Implements cubic spline interpolation for path smoothing
+Implements cubic spline interpolation for path smoothing using SciPy
 """
 
 import rclpy
@@ -10,70 +10,11 @@ from nav_msgs.msg import Path
 from geometry_msgs.msg import PoseStamped
 import numpy as np
 import math
+from scipy.interpolate import CubicSpline, splprep, splev
 from typing import List, Tuple
 
 
-class CubicSpline:
-    """
-    Simple cubic spline implementation for path smoothing
-    Uses natural cubic spline interpolation
-    """
-    
-    def __init__(self, x: List[float], y: List[float]):
-        self.x = np.array(x)
-        self.y = np.array(y)
-        self.n = len(x)
-        
-        # Calculate spline coefficients
-        self.a, self.b, self.c, self.d = self._calculate_coefficients()
-    
-    def _calculate_coefficients(self):
-        """Calculate cubic spline coefficients using natural spline conditions"""
-        n = self.n - 1
-        h = np.diff(self.x)
-        
-        # Build the tridiagonal system for second derivatives
-        A = np.zeros((n + 1, n + 1))
-        B = np.zeros(n + 1)
-        
-        # Natural spline boundary conditions (second derivative = 0 at endpoints)
-        A[0, 0] = 1
-        A[n, n] = 1
-        
-        # Interior points
-        for i in range(1, n):
-            A[i, i-1] = h[i-1]
-            A[i, i] = 2 * (h[i-1] + h[i])
-            A[i, i+1] = h[i]
-            B[i] = 3 * ((self.y[i+1] - self.y[i]) / h[i] - (self.y[i] - self.y[i-1]) / h[i-1])
-        
-        # Solve for second derivatives
-        c = np.linalg.solve(A, B)
-        
-        # Calculate other coefficients
-        a = self.y[:-1].copy()
-        b = np.zeros(n)
-        d = np.zeros(n)
-        
-        for i in range(n):
-            b[i] = (self.y[i+1] - self.y[i]) / h[i] - h[i] * (2 * c[i] + c[i+1]) / 3
-            d[i] = (c[i+1] - c[i]) / (3 * h[i])
-        
-        return a, b, c[:-1], d
-    
-    def interpolate(self, x_new: float) -> float:
-        """Interpolate a single point"""
-        # Find the appropriate segment
-        i = np.searchsorted(self.x[1:], x_new)
-        i = min(i, len(self.a) - 1)
-        
-        # Calculate the interpolated value
-        dx = x_new - self.x[i]
-        return self.a[i] + self.b[i] * dx + self.c[i] * dx**2 + self.d[i] * dx**3
-    
-    def interpolate_path(self, x_new: np.ndarray) -> np.ndarray:
-        """Interpolate multiple points"""
-        return np.array([self.interpolate(x) for x in x_new])
+
 
 
 class PathSmoother(Node):
@@ -106,13 +47,14 @@ class PathSmoother(Node):
         # Timer to publish path periodically
         self.timer = self.create_timer(1.0, self.publish_smooth_path)
         
-        self.get_logger().info('Path Smoother Node initialized')
+        self.get_logger().info('Path Smoother Node initialized with SciPy')
         self.get_logger().info(f'Waypoints: {self.waypoints}')
         self.get_logger().info(f'Number of interpolated points: {self.num_points}')
+        self.get_logger().info('Using SciPy parametric splines (splprep/splev) with fallback to CubicSpline')
     
     def smooth_path(self, waypoints: List[Tuple[float, float]]) -> List[Tuple[float, float]]:
         """
-        Apply cubic spline smoothing to the waypoints
+        Apply cubic spline smoothing to the waypoints using SciPy
         
         Args:
             waypoints: List of (x, y) waypoint tuples
@@ -124,31 +66,55 @@ class PathSmoother(Node):
             return waypoints
         
         # Extract x and y coordinates
-        x_points = [wp[0] for wp in waypoints]
-        y_points = [wp[1] for wp in waypoints]
+        x_points = np.array([wp[0] for wp in waypoints])
+        y_points = np.array([wp[1] for wp in waypoints])
         
-        # Calculate cumulative distance for parameterization
-        distances = [0.0]
-        for i in range(1, len(waypoints)):
-            dx = x_points[i] - x_points[i-1]
-            dy = y_points[i] - y_points[i-1]
-            dist = math.sqrt(dx*dx + dy*dy)
-            distances.append(distances[-1] + dist)
-        
-        # Create cubic splines for x and y as functions of distance
-        spline_x = CubicSpline(distances, x_points)
-        spline_y = CubicSpline(distances, y_points)
-        
-        # Generate dense sampling of the path
-        total_distance = distances[-1]
-        sample_distances = np.linspace(0, total_distance, self.num_points)
-        
-        # Interpolate smooth path
-        smooth_x = spline_x.interpolate_path(sample_distances)
-        smooth_y = spline_y.interpolate_path(sample_distances)
-        
-        # Return as list of tuples
-        return list(zip(smooth_x, smooth_y))
+        # Method 1: Use parametric spline interpolation with splprep/splev
+        # This method is better for 2D paths as it treats the path as a parametric curve
+        try:
+            # Create parametric spline representation
+            # s=0 forces the spline to pass through all points exactly
+            # k=3 for cubic splines (default)
+            tck, u = splprep([x_points, y_points], s=0, k=min(3, len(waypoints)-1))
+            
+            # Generate new parameter values for dense sampling
+            u_new = np.linspace(0, 1, self.num_points)
+            
+            # Evaluate spline at new parameter values
+            smooth_points = splev(u_new, tck)
+            smooth_x, smooth_y = smooth_points
+            
+            # Return as list of tuples
+            return list(zip(smooth_x, smooth_y))
+            
+        except Exception as e:
+            self.get_logger().warn(f'Parametric spline failed: {e}, falling back to distance-based method')
+            
+            # Method 2: Fallback to distance-based cubic spline interpolation
+            # Calculate cumulative distance for parameterization
+            distances = [0.0]
+            for i in range(1, len(waypoints)):
+                dx = x_points[i] - x_points[i-1]
+                dy = y_points[i] - y_points[i-1]
+                dist = math.sqrt(dx*dx + dy*dy)
+                distances.append(distances[-1] + dist)
+            
+            distances = np.array(distances)
+            
+            # Create cubic splines for x and y as functions of distance using SciPy
+            spline_x = CubicSpline(distances, x_points, bc_type='natural')
+            spline_y = CubicSpline(distances, y_points, bc_type='natural')
+            
+            # Generate dense sampling of the path
+            total_distance = distances[-1]
+            sample_distances = np.linspace(0, total_distance, self.num_points)
+            
+            # Interpolate smooth path
+            smooth_x = spline_x(sample_distances)
+            smooth_y = spline_y(sample_distances)
+            
+            # Return as list of tuples
+            return list(zip(smooth_x, smooth_y))
     
     def create_path_message(self, path_points: List[Tuple[float, float]]) -> Path:
         """

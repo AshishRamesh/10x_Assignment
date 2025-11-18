@@ -30,6 +30,7 @@ setup(
             'path_smoother = bot_ctrl.path_smoother:main',
             'trajectory_generator = bot_ctrl.trajectory_generator:main',
             'trajectory_tracker = bot_ctrl.trajectory_tracker:main',
+            'path_visualizer = bot_ctrl.path_visualizer:main',
         ],
     },
 )

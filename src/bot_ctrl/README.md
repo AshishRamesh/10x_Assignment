@@ -35,12 +35,27 @@ The package consists of three main nodes:
   - Linear velocity: 0.15 m/s
   - Control frequency: 10 Hz
 
+### 4. Path Visualizer (`path_visualizer.py`)
+- **Function**: Comprehensive visualization of the entire pipeline
+- **Subscribes**:
+  - `/smooth_path` (nav_msgs/Path)
+  - `/trajectory` (nav_msgs/Path) 
+  - `/odom` (nav_msgs/Odometry)
+  - `/cmd_vel` (geometry_msgs/Twist)
+- **Features**:
+  - Combined path plot showing waypoints, smoothed path, trajectory, and tracked path
+  - Trajectory comparison graphs (x(t), y(t), heading(t))
+  - Tracking error analysis with RMS statistics
+  - Automatic PNG generation every 5 seconds
+  - Saves to `/visualizations/` directory
+
 ## Dependencies
 
 - ROS 2 (tested with Humble)
 - Python 3
 - NumPy
 - SciPy (for advanced smoothing capabilities)
+- Matplotlib (for visualization and plotting)
 - Standard ROS 2 message packages (nav_msgs, geometry_msgs)
 
 ## Installation
@@ -53,7 +68,7 @@ git clone <repository_url>
 
 2. Install dependencies:
 ```bash
-sudo apt install python3-scipy
+sudo apt install python3-scipy python3-matplotlib
 ```
 
 3. Build the package:
@@ -70,10 +85,17 @@ source install/setup.bash
 ## Usage
 
 ### Launch All Nodes
-To start the complete system with all three nodes:
+To start the complete system with all four nodes (including visualization):
 
 ```bash
 ros2 launch bot_ctrl bot_ctrl_launch.py
+```
+
+### Launch Only Visualization
+To run only the visualization node (when other nodes are already running):
+
+```bash
+ros2 launch bot_ctrl visualization_launch.py
 ```
 
 ### Launch Individual Nodes
@@ -88,6 +110,9 @@ ros2 run bot_ctrl trajectory_generator
 
 # Trajectory tracker only
 ros2 run bot_ctrl trajectory_tracker
+
+# Path visualizer only
+ros2 run bot_ctrl path_visualizer
 ```
 
 ### With TurtleBot4 in Ignition Gazebo
@@ -110,6 +135,14 @@ The robot should automatically start following the predefined trajectory.
 - `/trajectory`: Time-parameterized trajectory with orientations
 - `/cmd_vel`: Velocity commands for the robot
 - `/odom`: Robot odometry (subscribed from TurtleBot4)
+
+## Visualization Output
+
+The visualization node automatically generates PNG files every 5 seconds in the `visualizations/` directory:
+
+- **Combined Path Plot**: Shows waypoints, smoothed path, generated trajectory, and tracked trajectory in one graph
+- **Trajectory Comparison**: Separate plots for x(t), y(t), and heading(t) comparing generated vs tracked
+- **Tracking Error Analysis**: Error plots with RMS statistics for position and heading tracking
 
 ## Parameters
 

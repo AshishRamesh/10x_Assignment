@@ -27,11 +27,11 @@ class PathSmoother(Node):
         
         # Hardcoded waypoints
         self.waypoints = [
-            (0.0, 0.0),
-            (1.0, 0.5),
-            (2.0, 1.0),
-            (2.5, 0.5),
-            (3.0, 0.0)
+            (-2.75, -0.82),
+            (-3.75, -0.1),
+            (-3.80, 0.88),
+            (-1.81, 0.88),
+            (-1.71, -0.04)
         ]
         
         # Number of interpolated points

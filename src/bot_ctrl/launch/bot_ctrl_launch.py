@@ -64,9 +64,22 @@ def generate_launch_description():
         ]
     )
     
+    # Path Visualizer Node
+    path_visualizer_node = Node(
+        package='bot_ctrl',
+        executable='path_visualizer',
+        name='path_visualizer',
+        output='screen',
+        parameters=[{'use_sim_time': use_sim_time}],
+        remappings=[
+            # Add any necessary topic remappings here
+        ]
+    )
+    
     return LaunchDescription([
         use_sim_time_arg,
         path_smoother_node,
         trajectory_generator_node,
         trajectory_tracker_node,
+        path_visualizer_node,
     ])

@@ -44,8 +44,9 @@ class PathSmoother(Node):
             10
         )
         
-        # Timer to publish path periodically
-        self.timer = self.create_timer(1.0, self.publish_smooth_path)
+        # Timer to publish path once at startup and then stop
+        self.published = False
+        self.timer = self.create_timer(2.0, self.publish_smooth_path)  # 2 second delay for startup
         
         self.get_logger().info('Path Smoother Node initialized with SciPy')
         self.get_logger().info(f'Waypoints: {self.waypoints}')
@@ -150,7 +151,10 @@ class PathSmoother(Node):
         return path_msg
     
     def publish_smooth_path(self):
-        """Timer callback to publish the smoothed path"""
+        """Timer callback to publish the smoothed path (only once)"""
+        if self.published:
+            return  # Already published, don't publish again
+            
         try:
             # Generate smooth path
             smooth_points = self.smooth_path(self.waypoints)
@@ -159,10 +163,11 @@ class PathSmoother(Node):
             path_msg = self.create_path_message(smooth_points)
             self.path_publisher.publish(path_msg)
             
-            self.get_logger().info(
-                f'Published smooth path with {len(smooth_points)} points',
-                throttle_duration_sec=5.0  # Log every 5 seconds
-            )
+            self.get_logger().info(f'Published smooth path with {len(smooth_points)} points (one-time)')
+            
+            # Mark as published and destroy timer
+            self.published = True
+            self.timer.cancel()
             
         except Exception as e:
             self.get_logger().error(f'Error in path smoothing: {str(e)}')

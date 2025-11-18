@@ -29,6 +29,7 @@ class TrajectoryTracker(Node):
         self.current_pose = None
         self.current_trajectory = None
         self.target_point_index = 0
+        self.last_trajectory_hash = None  # To track if trajectory changed
         
         # Subscribers
         self.trajectory_subscriber = self.create_subscription(
@@ -215,13 +216,35 @@ class TrajectoryTracker(Node):
         Args:
             msg: Received trajectory message
         """
-        self.current_trajectory = msg
-        self.target_point_index = 0  # Reset target point index
-        
-        self.get_logger().info(
-            f'Received new trajectory with {len(msg.poses)} points',
-            throttle_duration_sec=2.0
-        )
+        # Create a simple hash of the trajectory to detect if it's actually new
+        if len(msg.poses) > 0:
+            # Hash based on first and last points and number of points
+            first_pose = msg.poses[0].pose.position
+            last_pose = msg.poses[-1].pose.position
+            trajectory_hash = hash((
+                len(msg.poses),
+                round(first_pose.x, 3),
+                round(first_pose.y, 3),
+                round(last_pose.x, 3),
+                round(last_pose.y, 3)
+            ))
+            
+            # Only reset if this is actually a new trajectory
+            if trajectory_hash != self.last_trajectory_hash:
+                self.current_trajectory = msg
+                self.target_point_index = 0  # Reset target point index only for new trajectories
+                self.last_trajectory_hash = trajectory_hash
+                
+                self.get_logger().info(
+                    f'Received NEW trajectory with {len(msg.poses)} points - resetting tracking'
+                )
+            else:
+                # Same trajectory, just update the reference but don't reset tracking
+                self.current_trajectory = msg
+                self.get_logger().debug('Same trajectory received, continuing tracking')
+        else:
+            self.current_trajectory = msg
+            self.target_point_index = 0
     
     def odom_callback(self, msg: Odometry):
         """

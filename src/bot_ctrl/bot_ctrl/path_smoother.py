@@ -31,11 +31,12 @@ class PathSmoother(Node):
             (-3.75, -0.1),
             (-3.80, 0.88),
             (-1.81, 0.88),
-            (-1.71, -0.04)
+            (-1.71, -0.04),
+            (-2.75, -0.82)
         ]
         
         # Number of interpolated points
-        self.num_points = 150  # Dense sampling between 100-200 points
+        self.num_points = 200  # Dense sampling between 100-200 points
         
         # Publisher for smooth path
         self.path_publisher = self.create_publisher(

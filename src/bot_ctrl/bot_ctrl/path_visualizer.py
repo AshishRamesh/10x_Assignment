@@ -36,6 +36,10 @@ class PathVisualizer(Node):
         self.odometry_data = []
         self.cmd_vel_data = []
         
+        # Error tracking data
+        self.error_timestamps = []
+        self.tracking_errors = []
+        
         # Timing data
         self.start_time = None
         
@@ -82,9 +86,13 @@ class PathVisualizer(Node):
     
     def setup_plots(self):
         """Initialize matplotlib figures and axes for live plotting"""
-        # Combined path plot - single window
-        self.fig1, self.ax1 = plt.subplots(figsize=(12, 8))
+        # Create figure with subplots
+        self.fig1, (self.ax1, self.ax2) = plt.subplots(1, 2, figsize=(16, 8))
         self.fig1.suptitle('Path Planning and Execution Pipeline Overview', fontsize=14, fontweight='bold')
+        
+        # Set subplot titles
+        self.ax1.set_title('Complete Path Visualization', fontsize=12, fontweight='bold')
+        self.ax2.set_title('Tracking Error Over Time', fontsize=12, fontweight='bold')
         
         # Show the figure
         plt.show(block=False)
@@ -207,6 +215,7 @@ class PathVisualizer(Node):
         """Update the combined plot with latest data"""
         with self.data_lock:
             self.ax1.clear()
+            self.ax2.clear()
             
             # Check if we have any data to plot
             has_data = (self.original_waypoints or self.smooth_path_data or 
@@ -219,6 +228,12 @@ class PathVisualizer(Node):
                             bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
                 self.ax1.set_xlim(-1, 4)
                 self.ax1.set_ylim(-1, 2)
+                
+                self.ax2.text(0.5, 0.5, 'Waiting for tracking data...\nError plot will appear when robot starts moving', 
+                            transform=self.ax2.transAxes, fontsize=14, ha='center', va='center',
+                            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+                self.ax2.set_xlim(0, 10)
+                self.ax2.set_ylim(0, 1)
             else:
                 # Plot 1: Original waypoints (only if extracted from smooth path)
                 if self.original_waypoints:
@@ -266,7 +281,7 @@ class PathVisualizer(Node):
                         
                         self.ax1.scatter(start_x, start_y, c='green', s=150, marker='^', 
                                       label='Start Position', zorder=6, edgecolors='black')
-                        self.ax1.scatter(end_x, end_y, c='red', s=150, marker='s', 
+                        self.ax1.scatter(end_x, end_y, c='blue', s=150, marker='s', 
                                       label='Current Position', zorder=6, edgecolors='black')
                 
                 # Add statistics text box (only when we have data)
@@ -274,21 +289,80 @@ class PathVisualizer(Node):
                 stats_text += f"• Waypoints: {len(self.original_waypoints)}\n"
                 stats_text += f"• Smooth Path: {len(self.smooth_path_data)}\n"
                 stats_text += f"• Trajectory: {len(self.trajectory_data)}\n"
-                stats_text += f"• Odometry: {len(self.odometry_data)}"
+                
+                # Add current tracking error
+                if self.trajectory_data and len(self.odometry_data) > 0:
+                    current_error = self.get_current_tracking_error()
+                    stats_text += f"• Current Error: {current_error:.3f} m"
+                    
+                    # Store error data for time series plot
+                    if self.start_time:
+                        current_time = self.get_clock().now()
+                        timestamp = (current_time - self.start_time).nanoseconds / 1e9
+                        self.error_timestamps.append(timestamp)
+                        self.tracking_errors.append(current_error)
                 
                 self.ax1.text(0.02, 0.98, stats_text, transform=self.ax1.transAxes, fontsize=9,
                             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+                
+                # Update error plot
+                self.update_error_plot()
             
-            # Styling (always applied)
+            # Styling for main plot (ax1)
             self.ax1.set_xlabel('X Position (m)', fontsize=12)
             self.ax1.set_ylabel('Y Position (m)', fontsize=12)
             if has_data:
                 self.ax1.legend(loc='best', fontsize=10)
                 self.ax1.set_aspect('equal', adjustable='box')
             self.ax1.grid(True, alpha=0.3)
+            
+            # Styling for error plot (ax2)
+            self.ax2.set_xlabel('Time (s)', fontsize=12)
+            self.ax2.set_ylabel('Tracking Error (m)', fontsize=12)
+            self.ax2.grid(True, alpha=0.3)
     
-
+    def update_error_plot(self):
+        """Update the tracking error time series plot"""
+        if len(self.tracking_errors) < 2:
+            self.ax2.text(0.5, 0.5, 'Collecting error data...\nGraph will appear as robot moves', 
+                        transform=self.ax2.transAxes, fontsize=12, ha='center', va='center',
+                        bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
+            return
+        
+        # Plot the tracking error over time
+        self.ax2.plot(self.error_timestamps, self.tracking_errors, 'red', linewidth=2, 
+                     label='Tracking Error', alpha=0.8)
+        
+        # Add current error point
+        if self.tracking_errors:
+            self.ax2.scatter(self.error_timestamps[-1], self.tracking_errors[-1], 
+                           c='red', s=50, zorder=5, edgecolors='black')
+        
+        # Set y-axis to start from 0 and auto-scale
+        if self.tracking_errors:
+            max_error = max(self.tracking_errors)
+            self.ax2.set_ylim(0, max(max_error * 1.1, 0.1))  # At least 0.1m for visibility
+        
+        # Keep only last 100 points for performance
+        if len(self.tracking_errors) > 100:
+            self.error_timestamps = self.error_timestamps[-100:]
+            self.tracking_errors = self.tracking_errors[-100:]
     
+    def get_current_tracking_error(self):
+        """Get the current tracking error between robot position and closest trajectory point"""
+        if not self.trajectory_data or len(self.odometry_data) == 0:
+            return 0.0
+        
+        # Get current robot position (latest odometry)
+        current_odom = self.odometry_data[-1]
+        current_x, current_y = current_odom[1], current_odom[2]
+        
+        # Find closest point on trajectory
+        traj_points = np.array([(pt[0], pt[1]) for pt in self.trajectory_data])
+        distances = np.sqrt((traj_points[:, 0] - current_x)**2 + (traj_points[:, 1] - current_y)**2)
+        min_distance = np.min(distances)
+        
+        return min_distance
 
     
     def update_plots(self):

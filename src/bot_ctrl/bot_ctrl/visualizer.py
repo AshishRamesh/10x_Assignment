@@ -7,13 +7,15 @@ Collects and visualizes the entire path-planning and execution pipeline in live 
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped, Twist, PointStamped
+from geometry_msgs.msg import PoseStamped, Twist
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.gridspec import GridSpec
 from matplotlib.animation import FuncAnimation
 import math
+import os
+from datetime import datetime
 from typing import List, Tuple, Optional
 import threading
 
@@ -30,7 +32,7 @@ class PathVisualizer(Node):
         super().__init__('path_visualizer')
         
         # Data storage - start with empty data
-        self.clicked_waypoints = []  # All clicked waypoints from /clicked_point
+        self.original_waypoints = []  # Will be extracted from smooth path data
         self.smooth_path_data = []
         self.trajectory_data = []
         self.odometry_data = []
@@ -50,13 +52,6 @@ class PathVisualizer(Node):
         self.setup_plots()
         
         # Subscribers
-        self.clicked_point_sub = self.create_subscription(
-            PointStamped,
-            '/clicked_point',
-            self.clicked_point_callback,
-            10
-        )
-        
         self.smooth_path_sub = self.create_subscription(
             Path,
             '/smooth_path',
@@ -93,15 +88,22 @@ class PathVisualizer(Node):
     
     def setup_plots(self):
         """Initialize matplotlib figures and axes for live plotting"""
-        # Create figure with subplots
-        self.fig1, (self.ax1, self.ax2) = plt.subplots(1, 2, figsize=(16, 8))
-        self.fig1.suptitle('Path Planning and Execution Pipeline Overview', fontsize=14, fontweight='bold')
-        
-        # Set subplot titles
+        # Create main display figure with single plot
+        self.fig1, self.ax1 = plt.subplots(1, 1, figsize=(12, 8))
+        self.fig1.suptitle('Path Planning and Execution Pipeline', fontsize=14, fontweight='bold')
         self.ax1.set_title('Complete Path Visualization', fontsize=12, fontweight='bold')
+        
+        # Create background figure for error tracking (never displayed, only for saving)
+        self.fig_error = plt.figure(figsize=(10, 6))
+        self.ax2 = self.fig_error.add_subplot(1, 1, 1)
+        self.fig_error.suptitle('Tracking Error Analysis', fontsize=14, fontweight='bold')
         self.ax2.set_title('Tracking Error Over Time', fontsize=12, fontweight='bold')
         
-        # Show the figure
+        # Close the background figure immediately so it's never shown
+        plt.close(self.fig_error)
+        
+        # Show only the main figure
+        plt.figure(self.fig1.number)
         plt.show(block=False)
         
         # Initialize empty line objects for efficient updating
@@ -125,18 +127,6 @@ class PathVisualizer(Node):
         cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
         return math.atan2(siny_cosp, cosy_cosp)
     
-    def clicked_point_callback(self, msg: PointStamped):
-        """Callback for clicked points from RViz"""
-        with self.data_lock:
-            # Add clicked waypoint to the list
-            waypoint = (msg.point.x, msg.point.y)
-            self.clicked_waypoints.append(waypoint)
-            
-            self.get_logger().info(
-                f'Visualizer: Added waypoint ({waypoint[0]:.2f}, {waypoint[1]:.2f}). '
-                f'Total waypoints: {len(self.clicked_waypoints)}'
-            )
-    
     def smooth_path_callback(self, msg: Path):
         """Callback for smooth path data"""
         with self.data_lock:
@@ -159,6 +149,15 @@ class PathVisualizer(Node):
                 path_points.append((x, y, yaw))
             
             self.smooth_path_data = path_points
+            
+            # Extract approximate waypoints from smooth path (first time only)
+            if not self.original_waypoints and len(path_points) > 10:
+                # Take evenly spaced points to approximate original waypoints
+                step = len(path_points) // 5  # Assuming 5 original waypoints
+                waypoint_indices = [0, step, 2*step, 3*step, len(path_points)-1]
+                self.original_waypoints = [(path_points[i][0], path_points[i][1]) 
+                                         for i in waypoint_indices if i < len(path_points)]
+                self.get_logger().info(f'Extracted {len(self.original_waypoints)} waypoints from smooth path')
     
     def trajectory_callback(self, msg: Path):
         """Callback for trajectory data"""
@@ -222,150 +221,149 @@ class PathVisualizer(Node):
             self.cmd_vel_data.append((timestamp, vx, wz))
     
     def update_combined_plot(self):
-        """Update the combined plot with latest data"""
+        """Update the main visualization plot and error tracking (background)"""
         with self.data_lock:
-            self.ax1.clear()
-            self.ax2.clear()
+            self.update_main_plot()
+            # Update error tracking in background
+            self.update_error_tracking()
+    
+    def update_main_plot(self):
+        """Update only the main visualization plot"""
+        self.ax1.clear()
+        
+        # Check if we have any data to plot
+        has_data = (self.original_waypoints or self.smooth_path_data or 
+                   self.trajectory_data or self.odometry_data)
+        
+        if not has_data:
+            # Show waiting message when no data is available
+            self.ax1.text(0.5, 0.5, 'Waiting for data...\nStart the path planning nodes to see visualization', 
+                        transform=self.ax1.transAxes, fontsize=14, ha='center', va='center',
+                        bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+            self.ax1.set_xlim(-1, 4)
+            self.ax1.set_ylim(-1, 2)
+        else:
+            # Plot 1: Original waypoints (only if extracted from smooth path)
+            if self.original_waypoints:
+                wp_x = [wp[0] for wp in self.original_waypoints]
+                wp_y = [wp[1] for wp in self.original_waypoints]
+                self.ax1.scatter(wp_x, wp_y, c='red', s=100, marker='o', 
+                              label='Original Waypoints', zorder=5, edgecolors='black')
+                self.ax1.plot(wp_x, wp_y, 'r--', alpha=0.5, linewidth=1)
             
-            # Check if we have any data to plot
-            has_data = (self.clicked_waypoints or self.smooth_path_data or 
-                       self.trajectory_data or self.odometry_data)
+            # Plot 2: Smoothed path
+            if self.smooth_path_data:
+                smooth_x = [pt[0] for pt in self.smooth_path_data]
+                smooth_y = [pt[1] for pt in self.smooth_path_data]
+                self.ax1.plot(smooth_x, smooth_y, 'blue', linewidth=2, 
+                           label='Smoothed Path (SciPy Splines)', alpha=0.7)
             
-            if not has_data:
-                # Show waiting message when no data is available
-                self.ax1.text(0.5, 0.5, 'Waiting for data...\nStart the path planning nodes to see visualization', 
-                            transform=self.ax1.transAxes, fontsize=14, ha='center', va='center',
-                            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
-                self.ax1.set_xlim(-1, 4)
-                self.ax1.set_ylim(-1, 2)
+            # Plot 3: Generated trajectory
+            if self.trajectory_data:
+                traj_x = [pt[0] for pt in self.trajectory_data]
+                traj_y = [pt[1] for pt in self.trajectory_data]
+                self.ax1.plot(traj_x, traj_y, 'green', linewidth=3, 
+                           label='Generated Trajectory', alpha=0.8)
                 
-                self.ax2.text(0.5, 0.5, 'Waiting for tracking data...\nError plot will appear when robot starts moving', 
-                            transform=self.ax2.transAxes, fontsize=14, ha='center', va='center',
-                            bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
-                self.ax2.set_xlim(0, 10)
-                self.ax2.set_ylim(0, 1)
-            else:
-                # Plot 1: Clicked waypoints from RViz
-                if self.clicked_waypoints:
-                    wp_x = [wp[0] for wp in self.clicked_waypoints]
-                    wp_y = [wp[1] for wp in self.clicked_waypoints]
-                    self.ax1.scatter(wp_x, wp_y, c='red', s=100, marker='o', 
-                                  label='Clicked Waypoints', zorder=5, edgecolors='black')
-                    
-                    # Connect waypoints with dashed line to show order
-                    if len(self.clicked_waypoints) > 1:
-                        self.ax1.plot(wp_x, wp_y, 'r--', alpha=0.5, linewidth=1)
-                    
-                    # Number the waypoints to show click order
-                    for i, (x, y) in enumerate(self.clicked_waypoints):
-                        self.ax1.annotate(str(i+1), (x, y), xytext=(5, 5), 
-                                        textcoords='offset points', fontsize=8, 
-                                        fontweight='bold', color='white')
-                
-                # Plot 2: Smoothed path
-                if self.smooth_path_data:
-                    smooth_x = [pt[0] for pt in self.smooth_path_data]
-                    smooth_y = [pt[1] for pt in self.smooth_path_data]
-                    self.ax1.plot(smooth_x, smooth_y, 'blue', linewidth=2, 
-                               label='Smoothed Path (SciPy Splines)', alpha=0.7)
-                
-                # Plot 3: Generated trajectory
-                if self.trajectory_data:
-                    traj_x = [pt[0] for pt in self.trajectory_data]
-                    traj_y = [pt[1] for pt in self.trajectory_data]
-                    self.ax1.plot(traj_x, traj_y, 'green', linewidth=3, 
-                               label='Generated Trajectory', alpha=0.8)
-                    
-                    # Add direction arrows for trajectory
-                    if len(self.trajectory_data) > 10:
-                        step = len(self.trajectory_data) // 10
-                        for i in range(0, len(self.trajectory_data), step):
-                            x, y, yaw, _ = self.trajectory_data[i]
-                            dx = 0.1 * math.cos(yaw)
-                            dy = 0.1 * math.sin(yaw)
-                            self.ax1.arrow(x, y, dx, dy, head_width=0.05, head_length=0.03, 
-                                        fc='green', ec='green', alpha=0.6)
-                
-                # Plot 4: Tracked trajectory (actual robot path)
-                if len(self.odometry_data) > 1:
-                    odom_x = [pt[1] for pt in self.odometry_data]
-                    odom_y = [pt[2] for pt in self.odometry_data]
-                    self.ax1.plot(odom_x, odom_y, 'magenta', linewidth=2, 
-                               label='Tracked Trajectory (Actual)', linestyle='-')
-                    
-                    # Mark start and end positions
-                    if self.odometry_data:
-                        start_x, start_y = self.odometry_data[0][1], self.odometry_data[0][2]
-                        end_x, end_y = self.odometry_data[-1][1], self.odometry_data[-1][2]
-                        
-                        self.ax1.scatter(start_x, start_y, c='green', s=150, marker='^', 
-                                      label='Start Position', zorder=6, edgecolors='black')
-                        self.ax1.scatter(end_x, end_y, c='blue', s=150, marker='s', 
-                                      label='Current Position', zorder=6, edgecolors='black')
-                
-                # Add statistics text box (only when we have data)
-                stats_text = f"Data Points:\n"
-                stats_text += f"• Clicked Waypoints: {len(self.clicked_waypoints)}\n"
-                stats_text += f"• Smooth Path: {len(self.smooth_path_data)}\n"
-                stats_text += f"• Trajectory: {len(self.trajectory_data)}\n"
-                
-                # Add current tracking error
-                if self.trajectory_data and len(self.odometry_data) > 0:
-                    current_error = self.get_current_tracking_error()
-                    stats_text += f"• Current Error: {current_error:.3f} m"
-                    
-                    # Store error data for time series plot
-                    if self.start_time:
-                        current_time = self.get_clock().now()
-                        timestamp = (current_time - self.start_time).nanoseconds / 1e9
-                        self.error_timestamps.append(timestamp)
-                        self.tracking_errors.append(current_error)
-                
-                self.ax1.text(0.02, 0.98, stats_text, transform=self.ax1.transAxes, fontsize=9,
-                            verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-                
-                # Update error plot
-                self.update_error_plot()
+                # Add direction arrows for trajectory
+                if len(self.trajectory_data) > 10:
+                    step = len(self.trajectory_data) // 10
+                    for i in range(0, len(self.trajectory_data), step):
+                        x, y, yaw, _ = self.trajectory_data[i]
+                        dx = 0.1 * math.cos(yaw)
+                        dy = 0.1 * math.sin(yaw)
+                        self.ax1.arrow(x, y, dx, dy, head_width=0.05, head_length=0.03, 
+                                    fc='green', ec='green', alpha=0.6)
             
-            # Styling for main plot (ax1)
-            self.ax1.set_xlabel('X Position (m)', fontsize=12)
-            self.ax1.set_ylabel('Y Position (m)', fontsize=12)
-            if has_data:
-                self.ax1.legend(loc='best', fontsize=10)
-                self.ax1.set_aspect('equal', adjustable='box')
-            self.ax1.grid(True, alpha=0.3)
+            # Plot 4: Tracked trajectory (actual robot path)
+            if len(self.odometry_data) > 1:
+                odom_x = [pt[1] for pt in self.odometry_data]
+                odom_y = [pt[2] for pt in self.odometry_data]
+                self.ax1.plot(odom_x, odom_y, 'magenta', linewidth=2, 
+                           label='Tracked Trajectory (Actual)', linestyle='-')
+                
+                # Mark start and end positions
+                if self.odometry_data:
+                    start_x, start_y = self.odometry_data[0][1], self.odometry_data[0][2]
+                    end_x, end_y = self.odometry_data[-1][1], self.odometry_data[-1][2]
+                    
+                    self.ax1.scatter(start_x, start_y, c='green', s=150, marker='^', 
+                                  label='Start Position', zorder=6, edgecolors='black')
+                    self.ax1.scatter(end_x, end_y, c='blue', s=150, marker='s', 
+                                  label='Current Position', zorder=6, edgecolors='black')
             
-            # Styling for error plot (ax2)
-            self.ax2.set_xlabel('Time (s)', fontsize=12)
-            self.ax2.set_ylabel('Tracking Error (m)', fontsize=12)
-            self.ax2.grid(True, alpha=0.3)
+            # Add statistics text box (only when we have data)
+            stats_text = f"Data Points:\n"
+            stats_text += f"• Waypoints: {len(self.original_waypoints)}\n"
+            stats_text += f"• Smooth Path: {len(self.smooth_path_data)}\n"
+            stats_text += f"• Trajectory: {len(self.trajectory_data)}\n"
+            
+            # Add current tracking error
+            if self.trajectory_data and len(self.odometry_data) > 0:
+                current_error = self.get_current_tracking_error()
+                stats_text += f"• Current Error: {current_error:.3f} m"
+            
+            self.ax1.text(0.02, 0.98, stats_text, transform=self.ax1.transAxes, fontsize=9,
+                        verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        # Styling for main plot (ax1)
+        self.ax1.set_xlabel('X Position (m)', fontsize=12)
+        self.ax1.set_ylabel('Y Position (m)', fontsize=12)
+        if has_data:
+            self.ax1.legend(loc='best', fontsize=10)
+            self.ax1.set_aspect('equal', adjustable='box')
+        self.ax1.grid(True, alpha=0.3)
+    
+    def update_error_tracking(self):
+        """Update error tracking data in background (for saving later)"""
+        # Store error data for time series plot
+        if self.trajectory_data and len(self.odometry_data) > 0:
+            current_error = self.get_current_tracking_error()
+            
+            if self.start_time:
+                current_time = self.get_clock().now()
+                timestamp = (current_time - self.start_time).nanoseconds / 1e9
+                self.error_timestamps.append(timestamp)
+                self.tracking_errors.append(current_error)
+                
+                # Keep only last 1000 points for memory management
+                if len(self.tracking_errors) > 1000:
+                    self.error_timestamps = self.error_timestamps[-1000:]
+                    self.tracking_errors = self.tracking_errors[-1000:]
     
     def update_error_plot(self):
-        """Update the tracking error time series plot"""
+        """Update the tracking error time series plot (for background figure)"""
+        # Clear the background error plot
+        self.ax2.clear()
+        
         if len(self.tracking_errors) < 2:
             self.ax2.text(0.5, 0.5, 'Collecting error data...\nGraph will appear as robot moves', 
                         transform=self.ax2.transAxes, fontsize=12, ha='center', va='center',
                         bbox=dict(boxstyle='round', facecolor='lightyellow', alpha=0.8))
-            return
+            self.ax2.set_xlim(0, 10)
+            self.ax2.set_ylim(0, 1)
+        else:
+            # Plot the tracking error over time
+            self.ax2.plot(self.error_timestamps, self.tracking_errors, 'red', linewidth=2, 
+                         label='Tracking Error', alpha=0.8)
+            
+            # Add current error point
+            if self.tracking_errors:
+                self.ax2.scatter(self.error_timestamps[-1], self.tracking_errors[-1], 
+                               c='red', s=50, zorder=5, edgecolors='black')
+            
+            # Set y-axis to start from 0 and auto-scale
+            if self.tracking_errors:
+                max_error = max(self.tracking_errors)
+                self.ax2.set_ylim(0, max(max_error * 1.1, 0.1))  # At least 0.1m for visibility
         
-        # Plot the tracking error over time
-        self.ax2.plot(self.error_timestamps, self.tracking_errors, 'red', linewidth=2, 
-                     label='Tracking Error', alpha=0.8)
-        
-        # Add current error point
-        if self.tracking_errors:
-            self.ax2.scatter(self.error_timestamps[-1], self.tracking_errors[-1], 
-                           c='red', s=50, zorder=5, edgecolors='black')
-        
-        # Set y-axis to start from 0 and auto-scale
-        if self.tracking_errors:
-            max_error = max(self.tracking_errors)
-            self.ax2.set_ylim(0, max(max_error * 1.1, 0.1))  # At least 0.1m for visibility
-        
-        # Keep only last 100 points for performance
-        if len(self.tracking_errors) > 100:
-            self.error_timestamps = self.error_timestamps[-100:]
-            self.tracking_errors = self.tracking_errors[-100:]
+        # Styling for error plot (ax2)
+        self.ax2.set_xlabel('Time (s)', fontsize=12)
+        self.ax2.set_ylabel('Tracking Error (m)', fontsize=12)
+        self.ax2.set_title('Tracking Error Over Time', fontsize=12, fontweight='bold')
+        self.ax2.grid(True, alpha=0.3)
+        if len(self.tracking_errors) >= 2:
+            self.ax2.legend(loc='best', fontsize=10)
     
     def get_current_tracking_error(self):
         """Get the current tracking error between robot position and closest trajectory point"""
@@ -389,14 +387,15 @@ class PathVisualizer(Node):
         try:
             # Check if figure is still open
             if not plt.fignum_exists(self.fig1.number):
-                self.get_logger().warn('Plot window closed, shutting down...')
+                self.get_logger().info('Plot window closed, saving graphs and shutting down...')
+                self.save_graphs()
                 rclpy.shutdown()
                 return
             
             # Update the combined plot
             self.update_combined_plot()
             
-            # Refresh display
+            # Refresh display for main figure only
             self.fig1.canvas.draw()
             self.fig1.canvas.flush_events()
             
@@ -404,6 +403,41 @@ class PathVisualizer(Node):
                 
         except Exception as e:
             self.get_logger().error(f'Error updating plot: {str(e)}')
+    
+    def save_graphs(self):
+        """Save both the main visualization and error plots as images"""
+        try:
+            # Create timestamp for unique filenames
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Create output directory if it doesn't exist
+            output_dir = "/home/ashish/ros2/10x_Assignment/visualization_output"
+            os.makedirs(output_dir, exist_ok=True)
+            
+            # Update both plots one final time before saving
+            with self.data_lock:
+                # Update main visualization
+                self.update_main_plot()
+                
+                # Update error plot (background)
+                self.update_error_plot()
+            
+            # Save main visualization
+            main_filename = os.path.join(output_dir, f"path_visualization_{timestamp}.png")
+            self.fig1.savefig(main_filename, dpi=300, bbox_inches='tight', 
+                             facecolor='white', edgecolor='none')
+            
+            # Save error plot
+            error_filename = os.path.join(output_dir, f"tracking_error_{timestamp}.png")
+            self.fig_error.savefig(error_filename, dpi=300, bbox_inches='tight',
+                                  facecolor='white', edgecolor='none')
+            
+            self.get_logger().info(f'Graphs saved successfully:')
+            self.get_logger().info(f'  - Main visualization: {main_filename}')
+            self.get_logger().info(f'  - Tracking error: {error_filename}')
+            
+        except Exception as e:
+            self.get_logger().error(f'Error saving graphs: {str(e)}')
 
 
 def main(args=None):

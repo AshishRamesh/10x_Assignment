@@ -31,8 +31,7 @@ class PathSmoother(Node):
             (-3.75, -0.1),
             (-3.80, 0.88),
             (-1.81, 0.88),
-            (-1.71, -0.04),
-            (-2.75, -0.82)
+            (-1.71, -0.04)
         ]
         
         # Number of interpolated points

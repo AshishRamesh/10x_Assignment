@@ -54,15 +54,19 @@ class AStarNode:
 
 class AStarPlanner:
     """
-    A* pathfinding algorithm implementation for occupancy grids
+    A* pathfinding algorithm implementation for occupancy grids with safety features
     """
     
-    def __init__(self, occupancy_grid: OccupancyGrid):
+    def __init__(self, occupancy_grid: OccupancyGrid, inflation_radius: float = 0.5, 
+                 obstacle_threshold: int = 50, proximity_cost_weight: float = 2.0):
         """
-        Initialize A* planner with occupancy grid
+        Initialize A* planner with occupancy grid and safety parameters
         
         Args:
             occupancy_grid: ROS2 OccupancyGrid message
+            inflation_radius: Safety margin around obstacles (meters)
+            obstacle_threshold: Occupancy value threshold for obstacles (0-100)
+            proximity_cost_weight: Weight for obstacle proximity cost
         """
         self.grid = occupancy_grid
         self.width = occupancy_grid.info.width
@@ -70,6 +74,18 @@ class AStarPlanner:
         self.resolution = occupancy_grid.info.resolution
         self.origin_x = occupancy_grid.info.origin.position.x
         self.origin_y = occupancy_grid.info.origin.position.y
+        
+        # Safety parameters
+        self.inflation_radius = inflation_radius
+        self.obstacle_threshold = obstacle_threshold
+        self.proximity_cost_weight = proximity_cost_weight
+        
+        # Convert inflation radius to grid cells
+        self.inflation_cells = int(math.ceil(inflation_radius / self.resolution))
+        
+        # Create inflated obstacle map and distance map
+        self.inflated_obstacles = self._create_inflated_obstacles()
+        self.distance_map = self._compute_distance_to_obstacles()
         
         # 8-connected movement: includes diagonals
         # Format: (dx, dy, cost)
@@ -83,6 +99,101 @@ class AStarPlanner:
             ( 1,  0, 1.0),    # East
             ( 1,  1, 1.414),  # Southeast diagonal
         ]
+    
+    def _create_inflated_obstacles(self) -> List[List[bool]]:
+        """
+        Create inflated obstacle map with safety margins
+        
+        Returns:
+            2D boolean array where True indicates inflated obstacle
+        """
+        # Initialize inflated map
+        inflated = [[False for _ in range(self.width)] for _ in range(self.height)]
+        
+        # First pass: identify original obstacles
+        original_obstacles = []
+        for y in range(self.height):
+            for x in range(self.width):
+                if self._is_original_obstacle(x, y):
+                    original_obstacles.append((x, y))
+        
+        # Second pass: inflate around each obstacle
+        for obs_x, obs_y in original_obstacles:
+            # Inflate in a square pattern around the obstacle
+            for dy in range(-self.inflation_cells, self.inflation_cells + 1):
+                for dx in range(-self.inflation_cells, self.inflation_cells + 1):
+                    new_x = obs_x + dx
+                    new_y = obs_y + dy
+                    
+                    # Check if within inflation radius (circular inflation)
+                    distance = math.sqrt(dx*dx + dy*dy) * self.resolution
+                    
+                    if (distance <= self.inflation_radius and 
+                        self.is_valid_cell(new_x, new_y)):
+                        inflated[new_y][new_x] = True
+        
+        return inflated
+    
+    def _is_original_obstacle(self, x: int, y: int) -> bool:
+        """
+        Check if a cell is an original obstacle (before inflation)
+        
+        Args:
+            x: Map grid x coordinate
+            y: Map grid y coordinate
+            
+        Returns:
+            True if cell is an original obstacle
+        """
+        if not self.is_valid_cell(x, y):
+            return True  # Out of bounds treated as obstacle
+        
+        # Convert 2D coordinates to 1D array index
+        index = y * self.width + x
+        occupancy = self.grid.data[index]
+        
+        # Check for obstacles: high occupancy, unknown (-1), or out of threshold
+        return (occupancy >= self.obstacle_threshold or occupancy == -1)
+    
+    def _compute_distance_to_obstacles(self) -> List[List[float]]:
+        """
+        Compute distance from each cell to nearest original obstacle
+        
+        Returns:
+            2D array of distances to nearest obstacle
+        """
+        # Initialize distance map with large values
+        distances = [[float('inf') for _ in range(self.width)] for _ in range(self.height)]
+        
+        # Queue for BFS-style distance propagation
+        queue = deque()
+        
+        # Initialize distances for obstacle cells
+        for y in range(self.height):
+            for x in range(self.width):
+                if self._is_original_obstacle(x, y):
+                    distances[y][x] = 0.0
+                    queue.append((x, y, 0.0))
+        
+        # Propagate distances using BFS
+        directions = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
+        
+        while queue:
+            x, y, current_dist = queue.popleft()
+            
+            for dx, dy in directions:
+                new_x, new_y = x + dx, y + dy
+                
+                if self.is_valid_cell(new_x, new_y):
+                    # Calculate distance (accounting for diagonal movement)
+                    move_dist = math.sqrt(dx*dx + dy*dy) * self.resolution
+                    new_dist = current_dist + move_dist
+                    
+                    if new_dist < distances[new_y][new_x]:
+                        distances[new_y][new_x] = new_dist
+                        queue.append((new_x, new_y, new_dist))
+        
+        return distances
     
     def world_to_map(self, world_x: float, world_y: float) -> Tuple[int, int]:
         """
@@ -129,26 +240,20 @@ class AStarPlanner:
     
     def is_obstacle(self, x: int, y: int) -> bool:
         """
-        Check if a map cell contains an obstacle
+        Check if a grid cell is an obstacle (including inflated areas)
         
         Args:
             x: Map grid x coordinate
             y: Map grid y coordinate
             
         Returns:
-            True if cell is obstacle or unknown, False if free
+            True if cell is an obstacle or in inflated safety zone
         """
         if not self.is_valid_cell(x, y):
             return True  # Out of bounds treated as obstacle
         
-        # Convert 2D coordinates to 1D array index
-        index = y * self.width + x
-        
-        # Get occupancy value
-        occupancy = self.grid.data[index]
-        
-        # 0 = free, 100 = obstacle, -1 or unknown = treated as obstacle
-        return occupancy != 0
+        # Check inflated obstacle map for safety
+        return self.inflated_obstacles[y][x]
     
     def euclidean_heuristic(self, x1: int, y1: int, x2: int, y2: int) -> float:
         """
@@ -167,7 +272,7 @@ class AStarPlanner:
     
     def get_neighbors(self, node: AStarNode) -> List[Tuple[int, int, float]]:
         """
-        Generate valid neighbors for a node using 8-connected movement
+        Generate valid neighbors for a node using 8-connected movement with proximity costs
         
         Args:
             node: Current A* node
@@ -177,15 +282,44 @@ class AStarPlanner:
         """
         neighbors = []
         
-        for dx, dy, cost in self.movements:
+        for dx, dy, base_cost in self.movements:
             new_x = node.x + dx
             new_y = node.y + dy
             
             # Check if neighbor is valid and not an obstacle
             if self.is_valid_cell(new_x, new_y) and not self.is_obstacle(new_x, new_y):
-                neighbors.append((new_x, new_y, cost))
+                # Calculate proximity cost based on distance to obstacles
+                proximity_cost = self._calculate_proximity_cost(new_x, new_y)
+                total_cost = base_cost + proximity_cost
+                
+                neighbors.append((new_x, new_y, total_cost))
         
         return neighbors
+    
+    def _calculate_proximity_cost(self, x: int, y: int) -> float:
+        """
+        Calculate additional cost based on proximity to obstacles
+        
+        Args:
+            x: Grid x coordinate
+            y: Grid y coordinate
+            
+        Returns:
+            Additional cost penalty for being near obstacles
+        """
+        # Get distance to nearest obstacle
+        distance_to_obstacle = self.distance_map[y][x]
+        
+        # Apply exponential penalty for being close to obstacles
+        # Closer to obstacles = higher cost
+        if distance_to_obstacle < self.inflation_radius:
+            # Normalize distance (0 = at obstacle, 1 = at inflation boundary)
+            normalized_dist = distance_to_obstacle / self.inflation_radius
+            # Apply inverse exponential cost (closer = much more expensive)
+            proximity_penalty = self.proximity_cost_weight * (1.0 - normalized_dist)**2
+            return proximity_penalty
+        
+        return 0.0  # No penalty if far from obstacles
     
     def reconstruct_path(self, goal_node: AStarNode) -> List[Tuple[int, int]]:
         """

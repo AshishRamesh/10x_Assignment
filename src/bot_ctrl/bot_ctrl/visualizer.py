@@ -88,8 +88,8 @@ class PathVisualizer(Node):
     
     def setup_plots(self):
         """Initialize matplotlib figures and axes for live plotting"""
-        # Create main display figure with single plot
-        self.fig1, self.ax1 = plt.subplots(1, 1, figsize=(12, 8))
+        # Create main display figure with square aspect ratio
+        self.fig1, self.ax1 = plt.subplots(1, 1, figsize=(10, 10))
         self.fig1.suptitle('Path Planning and Execution Pipeline', fontsize=14, fontweight='bold')
         self.ax1.set_title('Complete Path Visualization', fontsize=12, fontweight='bold')
         
@@ -292,26 +292,14 @@ class PathVisualizer(Node):
                     self.ax1.scatter(end_x, end_y, c='blue', s=150, marker='s', 
                                   label='Current Position', zorder=6, edgecolors='black')
             
-            # Add statistics text box (only when we have data)
-            stats_text = f"Data Points:\n"
-            stats_text += f"• Waypoints: {len(self.original_waypoints)}\n"
-            stats_text += f"• Smooth Path: {len(self.smooth_path_data)}\n"
-            stats_text += f"• Trajectory: {len(self.trajectory_data)}\n"
-            
-            # Add current tracking error
-            if self.trajectory_data and len(self.odometry_data) > 0:
-                current_error = self.get_current_tracking_error()
-                stats_text += f"• Current Error: {current_error:.3f} m"
-            
-            self.ax1.text(0.02, 0.98, stats_text, transform=self.ax1.transAxes, fontsize=9,
-                        verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
-        
         # Styling for main plot (ax1)
         self.ax1.set_xlabel('X Position (m)', fontsize=12)
         self.ax1.set_ylabel('Y Position (m)', fontsize=12)
         if has_data:
-            self.ax1.legend(loc='best', fontsize=10)
-            self.ax1.set_aspect('equal', adjustable='box')
+            self.ax1.legend(loc='upper right', fontsize=10)
+        
+        # Force square aspect ratio
+        self.ax1.set_aspect('equal', adjustable='box')
         self.ax1.grid(True, alpha=0.3)
     
     def update_error_tracking(self):

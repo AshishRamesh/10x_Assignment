@@ -27,10 +27,11 @@ setup(
     },
     entry_points={
         'console_scripts': [
-            'path_smoother = bot_ctrl.path_smoother:main',
-            'trajectory_generator = bot_ctrl.trajectory_generator:main',
-            'trajectory_tracker = bot_ctrl.trajectory_tracker:main',
-            'path_visualizer = bot_ctrl.path_visualizer:main',
+            'smoother = bot_ctrl.smoother:main',
+            'smoother_clicked = bot_ctrl.smoother_clicked:main',
+            'planner = bot_ctrl.planner:main',
+            'controller = bot_ctrl.controller:main',
+            'visualizer = bot_ctrl.visualizer:main',
         ],
     },
 )

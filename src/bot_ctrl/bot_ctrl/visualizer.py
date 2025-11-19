@@ -7,7 +7,7 @@ Collects and visualizes the entire path-planning and execution pipeline in live 
 import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Path, Odometry
-from geometry_msgs.msg import PoseStamped, Twist
+from geometry_msgs.msg import PoseStamped, Twist, PointStamped
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -30,7 +30,7 @@ class PathVisualizer(Node):
         super().__init__('path_visualizer')
         
         # Data storage - start with empty data
-        self.original_waypoints = []  # Will be extracted from smooth path data
+        self.clicked_waypoints = []  # All clicked waypoints from /clicked_point
         self.smooth_path_data = []
         self.trajectory_data = []
         self.odometry_data = []
@@ -50,6 +50,13 @@ class PathVisualizer(Node):
         self.setup_plots()
         
         # Subscribers
+        self.clicked_point_sub = self.create_subscription(
+            PointStamped,
+            '/clicked_point',
+            self.clicked_point_callback,
+            10
+        )
+        
         self.smooth_path_sub = self.create_subscription(
             Path,
             '/smooth_path',
@@ -118,6 +125,18 @@ class PathVisualizer(Node):
         cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
         return math.atan2(siny_cosp, cosy_cosp)
     
+    def clicked_point_callback(self, msg: PointStamped):
+        """Callback for clicked points from RViz"""
+        with self.data_lock:
+            # Add clicked waypoint to the list
+            waypoint = (msg.point.x, msg.point.y)
+            self.clicked_waypoints.append(waypoint)
+            
+            self.get_logger().info(
+                f'Visualizer: Added waypoint ({waypoint[0]:.2f}, {waypoint[1]:.2f}). '
+                f'Total waypoints: {len(self.clicked_waypoints)}'
+            )
+    
     def smooth_path_callback(self, msg: Path):
         """Callback for smooth path data"""
         with self.data_lock:
@@ -140,15 +159,6 @@ class PathVisualizer(Node):
                 path_points.append((x, y, yaw))
             
             self.smooth_path_data = path_points
-            
-            # Extract approximate waypoints from smooth path (first time only)
-            if not self.original_waypoints and len(path_points) > 10:
-                # Take evenly spaced points to approximate original waypoints
-                step = len(path_points) // 5  # Assuming 5 original waypoints
-                waypoint_indices = [0, step, 2*step, 3*step, len(path_points)-1]
-                self.original_waypoints = [(path_points[i][0], path_points[i][1]) 
-                                         for i in waypoint_indices if i < len(path_points)]
-                self.get_logger().info(f'Extracted {len(self.original_waypoints)} waypoints from smooth path')
     
     def trajectory_callback(self, msg: Path):
         """Callback for trajectory data"""
@@ -218,7 +228,7 @@ class PathVisualizer(Node):
             self.ax2.clear()
             
             # Check if we have any data to plot
-            has_data = (self.original_waypoints or self.smooth_path_data or 
+            has_data = (self.clicked_waypoints or self.smooth_path_data or 
                        self.trajectory_data or self.odometry_data)
             
             if not has_data:
@@ -235,13 +245,22 @@ class PathVisualizer(Node):
                 self.ax2.set_xlim(0, 10)
                 self.ax2.set_ylim(0, 1)
             else:
-                # Plot 1: Original waypoints (only if extracted from smooth path)
-                if self.original_waypoints:
-                    wp_x = [wp[0] for wp in self.original_waypoints]
-                    wp_y = [wp[1] for wp in self.original_waypoints]
+                # Plot 1: Clicked waypoints from RViz
+                if self.clicked_waypoints:
+                    wp_x = [wp[0] for wp in self.clicked_waypoints]
+                    wp_y = [wp[1] for wp in self.clicked_waypoints]
                     self.ax1.scatter(wp_x, wp_y, c='red', s=100, marker='o', 
-                                  label='Original Waypoints', zorder=5, edgecolors='black')
-                    self.ax1.plot(wp_x, wp_y, 'r--', alpha=0.5, linewidth=1)
+                                  label='Clicked Waypoints', zorder=5, edgecolors='black')
+                    
+                    # Connect waypoints with dashed line to show order
+                    if len(self.clicked_waypoints) > 1:
+                        self.ax1.plot(wp_x, wp_y, 'r--', alpha=0.5, linewidth=1)
+                    
+                    # Number the waypoints to show click order
+                    for i, (x, y) in enumerate(self.clicked_waypoints):
+                        self.ax1.annotate(str(i+1), (x, y), xytext=(5, 5), 
+                                        textcoords='offset points', fontsize=8, 
+                                        fontweight='bold', color='white')
                 
                 # Plot 2: Smoothed path
                 if self.smooth_path_data:
@@ -286,7 +305,7 @@ class PathVisualizer(Node):
                 
                 # Add statistics text box (only when we have data)
                 stats_text = f"Data Points:\n"
-                stats_text += f"• Waypoints: {len(self.original_waypoints)}\n"
+                stats_text += f"• Clicked Waypoints: {len(self.clicked_waypoints)}\n"
                 stats_text += f"• Smooth Path: {len(self.smooth_path_data)}\n"
                 stats_text += f"• Trajectory: {len(self.trajectory_data)}\n"
                 

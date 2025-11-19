@@ -32,6 +32,8 @@ setup(
             'planner = bot_ctrl.planner:main',
             'controller = bot_ctrl.controller:main',
             'visualizer = bot_ctrl.visualizer:main',
+            'obstacle_avoid = bot_ctrl.obstacle_avoid:main',
+            'smoother_obstacle = bot_ctrl.smoother_obstacle:main'
         ],
     },
 )

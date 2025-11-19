@@ -25,7 +25,7 @@ class TrajectoryGenerator(Node):
         self.current_pose: Optional[Tuple[float, float, float]] = None  # (x, y, yaw) from odometry
         
         # Constant velocity for trajectory generation
-        self.linear_velocity = 0.15  # m/s as specified
+        self.linear_velocity = 0.5  # m/s - increased speed
         
         # Subscriber for smooth path
         self.path_subscriber = self.create_subscription(

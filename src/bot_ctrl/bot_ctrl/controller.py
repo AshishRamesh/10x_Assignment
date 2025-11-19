@@ -23,7 +23,7 @@ class TrajectoryTracker(Node):
         
         # Pure Pursuit controller parameters
         self.lookahead_distance = 0.5  # meters as specified
-        self.linear_velocity = 0.15    # m/s as specified
+        self.linear_velocity = 0.5     # m/s - increased speed
         
         # Current state
         self.current_pose = None

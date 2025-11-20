@@ -8,168 +8,89 @@ import rclpy
 from rclpy.node import Node
 from nav_msgs.msg import Path, Odometry
 from geometry_msgs.msg import PoseStamped
-import numpy as np
 import math
 from typing import List, Tuple, Optional
 
 
 class TrajectoryGenerator(Node):
-    """
-    ROS2 Node for generating time-parameterized trajectory from smooth path
-    """
+    """ROS2 Node for generating time-parameterized trajectory from smooth path"""
     
     def __init__(self):
         super().__init__('trajectory_generator')
         
-        # Robot state
-        self.current_pose: Optional[Tuple[float, float, float]] = None  # (x, y, yaw) from odometry
+        self.current_pose: Optional[Tuple[float, float, float]] = None
+        self.linear_velocity = 0.5  # m/s
         
-        # Constant velocity for trajectory generation
-        self.linear_velocity = 0.5  # m/s - increased speed
-        
-        # Subscriber for smooth path
         self.path_subscriber = self.create_subscription(
-            Path,
-            '/smooth_path',
-            self.path_callback,
-            10
-        )
+            Path, '/smooth_path', self.path_callback, 10)
         
-        # Subscriber for robot odometry
         self.odom_subscriber = self.create_subscription(
-            Odometry,
-            '/odom',
-            self.odom_callback,
-            10
-        )
+            Odometry, '/odom', self.odom_callback, 10)
         
-        # Publisher for trajectory
         self.trajectory_publisher = self.create_publisher(
-            Path,
-            '/trajectory',
-            10
-        )
+            Path, '/trajectory', 10)
         
         self.get_logger().info('Trajectory Generator Node initialized')
-        self.get_logger().info(f'Using constant velocity: {self.linear_velocity} m/s')
-        self.get_logger().info('Trajectories will start from robot current pose (/odom)')
+        self.get_logger().info(f'Velocity: {self.linear_velocity} m/s')
     
     def odom_callback(self, msg: Odometry):
-        """
-        Callback for odometry data to track current robot pose
-        
-        Args:
-            msg: Odometry message from /odom topic
-        """
-        # Extract position
+        """Update current robot pose from odometry"""
         x = msg.pose.pose.position.x
         y = msg.pose.pose.position.y
-        
-        # Convert quaternion to yaw
         quat = msg.pose.pose.orientation
         yaw = self.quaternion_to_yaw(quat.x, quat.y, quat.z, quat.w)
-        
-        # Store current pose
         self.current_pose = (x, y, yaw)
     
     def quaternion_to_yaw(self, qx: float, qy: float, qz: float, qw: float) -> float:
-        """
-        Convert quaternion to yaw angle
-        
-        Args:
-            qx, qy, qz, qw: Quaternion components
-            
-        Returns:
-            Yaw angle in radians
-        """
+        """Convert quaternion to yaw angle"""
         siny_cosp = 2 * (qw * qz + qx * qy)
         cosy_cosp = 1 - 2 * (qy * qy + qz * qz)
         return math.atan2(siny_cosp, cosy_cosp)
     
     def calculate_yaw_from_points(self, x1: float, y1: float, x2: float, y2: float) -> float:
-        """
-        Calculate yaw angle from two successive points
-        
-        Args:
-            x1, y1: First point coordinates
-            x2, y2: Second point coordinates
-            
-        Returns:
-            Yaw angle in radians
-        """
+        """Calculate yaw angle between two points"""
         return math.atan2(y2 - y1, x2 - x1)
     
     def quaternion_from_yaw(self, yaw: float) -> Tuple[float, float, float, float]:
-        """
-        Convert yaw angle to quaternion
-        
-        Args:
-            yaw: Yaw angle in radians
-            
-        Returns:
-            Quaternion as (x, y, z, w) tuple
-        """
+        """Convert yaw angle to quaternion (x, y, z, w)"""
         half_yaw = yaw * 0.5
-        return (
-            0.0,  # x
-            0.0,  # y
-            math.sin(half_yaw),  # z
-            math.cos(half_yaw)   # w
-        )
+        return (0.0, 0.0, math.sin(half_yaw), math.cos(half_yaw))
     
     def calculate_cumulative_distances(self, poses: List[PoseStamped]) -> List[float]:
-        """
-        Calculate cumulative distances along the path
-        
-        Args:
-            poses: List of PoseStamped messages
-            
-        Returns:
-            List of cumulative distances
-        """
+        """Calculate cumulative distances along path"""
         distances = [0.0]
         
         for i in range(1, len(poses)):
-            prev_pose = poses[i-1].pose.position
-            curr_pose = poses[i].pose.position
+            prev = poses[i-1].pose.position
+            curr = poses[i].pose.position
             
-            dx = curr_pose.x - prev_pose.x
-            dy = curr_pose.y - prev_pose.y
+            dx = curr.x - prev.x
+            dy = curr.y - prev.y
             
-            segment_distance = math.sqrt(dx*dx + dy*dy)
-            distances.append(distances[-1] + segment_distance)
+            distances.append(distances[-1] + math.sqrt(dx*dx + dy*dy))
         
         return distances
     
     def generate_trajectory(self, path_msg: Path) -> Path:
-        """
-        Generate time-parameterized trajectory from robot's current pose to path target
-        
-        Args:
-            path_msg: Input smooth path (target trajectory)
-            
-        Returns:
-            Time-parameterized trajectory starting from current robot pose
-        """
+        """Generate time-parameterized trajectory from current pose"""
         if len(path_msg.poses) < 1:
-            self.get_logger().warn('Path has no points, cannot generate trajectory')
+            self.get_logger().warn('Path has no points')
             return path_msg
         
         if self.current_pose is None:
-            self.get_logger().warn('No current robot pose available, using path as-is')
+            self.get_logger().warn('No current robot pose available')
             return path_msg
         
-        # Create modified path starting from current robot position
+        # Create path starting from current robot position
         modified_poses = []
         
-        # Add current robot pose as starting point
+        # Add current pose as starting point
         current_pose_stamped = PoseStamped()
         current_pose_stamped.header.frame_id = path_msg.header.frame_id
         current_pose_stamped.pose.position.x = self.current_pose[0]
         current_pose_stamped.pose.position.y = self.current_pose[1]
         current_pose_stamped.pose.position.z = 0.0
         
-        # Set current orientation
         qx, qy, qz, qw = self.quaternion_from_yaw(self.current_pose[2])
         current_pose_stamped.pose.orientation.x = qx
         current_pose_stamped.pose.orientation.y = qy
@@ -177,38 +98,29 @@ class TrajectoryGenerator(Node):
         current_pose_stamped.pose.orientation.w = qw
         
         modified_poses.append(current_pose_stamped)
-        
-        # Add all points from the original path
         modified_poses.extend(path_msg.poses)
         
-        # Calculate cumulative distances for the modified path
         distances = self.calculate_cumulative_distances(modified_poses)
         total_distance = distances[-1]
         
         if total_distance <= 0:
-            self.get_logger().warn('Total trajectory distance is zero')
+            self.get_logger().warn('Zero trajectory distance')
             return path_msg
         
         self.get_logger().info(
-            f'Generating trajectory from current pose ({self.current_pose[0]:.2f}, {self.current_pose[1]:.2f}) '
-            f'with total distance: {total_distance:.2f}m'
-        )
-        
-        # Calculate total travel time
-        total_time = total_distance / self.linear_velocity
+            f'Generating trajectory: {total_distance:.2f}m from ({self.current_pose[0]:.2f}, {self.current_pose[1]:.2f})')
         
         # Create trajectory message
         trajectory_msg = Path()
         trajectory_msg.header.stamp = self.get_clock().now().to_msg()
         trajectory_msg.header.frame_id = path_msg.header.frame_id
         
-        # Generate time-parameterized trajectory points from modified path
+        # Generate time-parameterized trajectory points
         for i, pose in enumerate(modified_poses):
-            # Create new pose with timestamp
             traj_pose = PoseStamped()
             traj_pose.header.frame_id = trajectory_msg.header.frame_id
             
-            # Calculate timestamp for this point
+            # Calculate timestamp
             time_offset = distances[i] / self.linear_velocity
             timestamp_ns = trajectory_msg.header.stamp.sec * 1_000_000_000 + trajectory_msg.header.stamp.nanosec
             timestamp_ns += int(time_offset * 1_000_000_000)
@@ -217,33 +129,21 @@ class TrajectoryGenerator(Node):
             traj_pose.header.stamp.nanosec = int(timestamp_ns % 1_000_000_000)
             
             # Copy position
-            traj_pose.pose.position.x = pose.pose.position.x
-            traj_pose.pose.position.y = pose.pose.position.y
-            traj_pose.pose.position.z = pose.pose.position.z
+            traj_pose.pose.position = pose.pose.position
             
-            # Calculate yaw from current and next point
+            # Calculate yaw angle for orientation
             if i < len(modified_poses) - 1:
-                # Use next point to calculate yaw
-                curr_x = pose.pose.position.x
-                curr_y = pose.pose.position.y
-                next_x = modified_poses[i+1].pose.position.x
-                next_y = modified_poses[i+1].pose.position.y
-                
-                yaw = self.calculate_yaw_from_points(curr_x, curr_y, next_x, next_y)
+                curr_pos = pose.pose.position
+                next_pos = modified_poses[i+1].pose.position
+                yaw = self.calculate_yaw_from_points(curr_pos.x, curr_pos.y, next_pos.x, next_pos.y)
+            elif i > 0:
+                prev_pos = modified_poses[i-1].pose.position
+                curr_pos = pose.pose.position
+                yaw = self.calculate_yaw_from_points(prev_pos.x, prev_pos.y, curr_pos.x, curr_pos.y)
             else:
-                # For last point, use previous yaw or calculate from previous point
-                if i > 0:
-                    prev_x = modified_poses[i-1].pose.position.x
-                    prev_y = modified_poses[i-1].pose.position.y
-                    curr_x = pose.pose.position.x
-                    curr_y = pose.pose.position.y
-                    
-                    yaw = self.calculate_yaw_from_points(prev_x, prev_y, curr_x, curr_y)
-                else:
-                    # Use current robot yaw for first point
-                    yaw = self.current_pose[2] if self.current_pose else 0.0
+                yaw = self.current_pose[2] if self.current_pose else 0.0
             
-            # Convert yaw to quaternion
+            # Set orientation
             qx, qy, qz, qw = self.quaternion_from_yaw(yaw)
             traj_pose.pose.orientation.x = qx
             traj_pose.pose.orientation.y = qy
@@ -255,25 +155,17 @@ class TrajectoryGenerator(Node):
         return trajectory_msg
     
     def path_callback(self, msg: Path):
-        """
-        Callback function for smooth path subscription
-        
-        Args:
-            msg: Received smooth path message
-        """
+        """Process received smooth path and generate trajectory"""
         try:
             if self.current_pose is None:
-                self.get_logger().warn('No robot odometry available yet. Waiting for /odom data...')
+                self.get_logger().warn('Waiting for odometry data...')
                 return
             
-            # Generate trajectory from robot's current pose to path target
             trajectory = self.generate_trajectory(msg)
-            
-            # Publish trajectory
             self.trajectory_publisher.publish(trajectory)
             
-            # Calculate trajectory info for logging
             if len(trajectory.poses) > 0:
+                # Calculate total distance for logging
                 total_distance = 0.0
                 for i in range(1, len(trajectory.poses)):
                     prev = trajectory.poses[i-1].pose.position
@@ -282,16 +174,13 @@ class TrajectoryGenerator(Node):
                     dy = curr.y - prev.y
                     total_distance += math.sqrt(dx*dx + dy*dy)
                 
-                total_time = total_distance / self.linear_velocity
-                
                 self.get_logger().info(
-                    f'Generated trajectory: {len(trajectory.poses)} points, '
-                    f'distance: {total_distance:.2f}m, time: {total_time:.1f}s',
-                    throttle_duration_sec=3.0
-                )
+                    f'Trajectory: {len(trajectory.poses)} points, {total_distance:.2f}m, '
+                    f'{total_distance/self.linear_velocity:.1f}s',
+                    throttle_duration_sec=3.0)
             
         except Exception as e:
-            self.get_logger().error(f'Error generating trajectory: {str(e)}')
+            self.get_logger().error(f'Trajectory generation error: {str(e)}')
 
 
 def main(args=None):
@@ -303,8 +192,6 @@ def main(args=None):
         rclpy.spin(trajectory_generator)
     except KeyboardInterrupt:
         pass
-    except Exception as e:
-        print(f'Error: {e}')
     finally:
         if rclpy.ok():
             rclpy.shutdown()

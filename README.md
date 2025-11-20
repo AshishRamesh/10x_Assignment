@@ -570,3 +570,5 @@ def laser_callback(self, scan_msg):
 ---
 
 *This project demonstrates advanced autonomous navigation capabilities suitable for research and industrial applications. The modular architecture enables easy extension and customization for specific robotic platforms and mission requirements.*
+
+

@@ -35,6 +35,13 @@ The project demonstrates the complete pipeline from waypoint specification (eith
 </p>
 <p align="center"><b>Fig: Maze World Environment for Navigation Testing</b></p>
 
+<p align="center">
+  <a href="https://youtu.be/egJDMCNASA8" target="_blank">
+    <img src="https://img.shields.io/badge/🎥_Watch_Demo-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Demo Video"/>
+  </a>
+</p>
+<p align="center"><b>📺 Complete System Demonstration Video</b></p>
+
 ### Demo 1 — Multi-Waypoint Path Smoothing
 This demonstration showcases the core path smoothing pipeline using predefined waypoints:
 
@@ -120,64 +127,6 @@ visualization_output/
 └── tracking_error_YYYYMMDD_HHMMSS.png        # Error analysis graphs
 ```
 
-## Demonstration & Results
-
-### Path Smoothing Visualization
-
-**Comparison Analysis**: Original waypoints vs. smoothed trajectories
-
-The path smoothing visualization demonstrates the transformation from discrete waypoints to continuous, differentiable paths suitable for robot navigation.
-
-**Key Metrics**:
-- **Input**: 5 discrete waypoints  
-- **Output**: 200 interpolated path points
-- **Smoothness**: C² continuous (smooth acceleration)
-- **Path Length**: Optimized between waypoint accuracy and path efficiency
-
-**Generated Visualizations**:
-```
-visualization_output/
-├── path_visualization_YYYYMMDD_HHMMSS.png
-└── Multi-waypoint comparison with original vs smoothed paths
-```
-
-### Trajectory Tracking Performance
-
-**Tracking Analysis**: Generated trajectory vs. executed path
-
-The trajectory tracking results demonstrate Pure Pursuit controller performance with quantitative error metrics.
-
-**Performance Metrics**:
-- **Lateral Error**: RMS deviation from reference path
-- **Heading Error**: Angular deviation from desired orientation  
-- **Convergence Time**: Time to reach steady-state tracking
-- **Goal Accuracy**: Final position error at waypoint arrival
-
-**Generated Analysis**:
-```
-visualization_output/
-├── tracking_error_YYYYMMDD_HHMMSS.png
-└── Error plots with statistical analysis (mean, RMS, max deviation)
-```
-
-### Obstacle Avoidance Validation
-
-**Navigation Analysis**: A* path vs. smoothed path vs. executed trajectory
-
-The obstacle avoidance validation shows the complete pipeline from grid-based planning to smooth execution.
-
-**Collision Metrics**:
-- **Safety Distance**: Minimum distance to obstacles during execution
-- **Path Efficiency**: Smoothed path length vs. A* path length  
-- **Planning Time**: Computational performance for real-time operation
-- **Success Rate**: Collision-free navigation completion percentage
-
-**Sample Results**:
-- A* Path Length: 12.3m (grid-based)
-- Smoothed Path Length: 11.8m (optimized)  
-- Execution Path Length: 12.1m (actual robot motion)
-- Minimum Obstacle Distance: 0.62m (exceeds 0.5m safety requirement)
-
 ---
 
 ## Features
@@ -210,8 +159,8 @@ The obstacle avoidance validation shows the complete pipeline from grid-based pl
 
 1. **Clone the repository into your ROS2 workspace:**
 ```bash
-cd ~/10x_Assignment
 git clone https://github.com/AshishRamesh/10x_Assignment
+cd ~/10x_Assignment
 ```
 
 2. **Run the automated setup script:**
@@ -232,8 +181,8 @@ If you prefer manual installation:
 
 1. **Clone the repository:**
 ```bash
-cd ~/10x_Assignment
 git clone https://github.com/AshishRamesh/10x_Assignment
+cd ~/10x_Assignment
 ```
 
 2. **Install system dependencies:**
@@ -351,8 +300,6 @@ ros2 launch bot_ctrl hardcoded_waypoints_launch.py
 
 ## System Architecture
 
-The navigation system implements a modular pipeline architecture with clear data flow and responsibilities:
-
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
 │   RViz User     │    │  Hardcoded       │    │  Occupancy      │
@@ -408,10 +355,12 @@ The navigation system implements a modular pipeline architecture with clear data
 
 ### Frame Coordination
 
-The system handles multiple coordinate frames through TF2 transformations:
-- **`/map`**: Global planning frame for obstacle avoidance
-- **`/odom`**: Odometry frame for trajectory tracking
-- **`/base_link`**: Robot body frame for control commands
+The navigation system implements a modular pipeline architecture with clear data flow and responsibilities:
+
+<p align="center">
+  <img src="assets/topic.png" alt="System Architecture and Topic Flow Diagram" width="800">
+</p>
+<p align="center"><b>Fig: System Architecture and Topic Flow Diagram</b></p>
 
 ---
 

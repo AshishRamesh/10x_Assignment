@@ -25,26 +25,24 @@ class PlannerState(Enum):
 
 @dataclass
 class AStarNode:
-    """
-    Node structure for A* algorithm
-    """
-    x: int              # Map grid x coordinate
-    y: int              # Map grid y coordinate  
-    g: float            # Cost from start to this node
-    h: float            # Heuristic cost from this node to goal
-    f: float = field(init=False)  # Total cost (g + h)
+    """Node structure for A* algorithm"""
+    x: int
+    y: int
+    g: float
+    h: float
+    f: float = field(init=False)
     parent: Optional['AStarNode'] = None
     
     def __post_init__(self):
-        """Calculate f after initialization"""
+        """Calculate total cost f = g + h"""
         self.f = self.g + self.h
         
     def __lt__(self, other):
-        """Comparison for priority queue (lower f cost has higher priority)"""
+        """Priority queue comparison"""
         return self.f < other.f
     
     def __eq__(self, other):
-        """Equality check based on position"""
+        """Position-based equality"""
         return self.x == other.x and self.y == other.y
     
     def __hash__(self):
@@ -53,21 +51,11 @@ class AStarNode:
 
 
 class AStarPlanner:
-    """
-    A* pathfinding algorithm implementation for occupancy grids with safety features
-    """
+    """A* pathfinding for occupancy grids with obstacle inflation"""
     
     def __init__(self, occupancy_grid: OccupancyGrid, inflation_radius: float = 0.5, 
                  obstacle_threshold: int = 50, proximity_cost_weight: float = 2.0):
-        """
-        Initialize A* planner with occupancy grid and safety parameters
-        
-        Args:
-            occupancy_grid: ROS2 OccupancyGrid message
-            inflation_radius: Safety margin around obstacles (meters)
-            obstacle_threshold: Occupancy value threshold for obstacles (0-100)
-            proximity_cost_weight: Weight for obstacle proximity cost
-        """
+        """Initialize A* planner with safety parameters"""
         self.grid = occupancy_grid
         self.width = occupancy_grid.info.width
         self.height = occupancy_grid.info.height
@@ -75,57 +63,40 @@ class AStarPlanner:
         self.origin_x = occupancy_grid.info.origin.position.x
         self.origin_y = occupancy_grid.info.origin.position.y
         
-        # Safety parameters
         self.inflation_radius = inflation_radius
         self.obstacle_threshold = obstacle_threshold
         self.proximity_cost_weight = proximity_cost_weight
         
-        # Convert inflation radius to grid cells
         self.inflation_cells = int(math.ceil(inflation_radius / self.resolution))
         
-        # Create inflated obstacle map and distance map
         self.inflated_obstacles = self._create_inflated_obstacles()
         self.distance_map = self._compute_distance_to_obstacles()
         
-        # 8-connected movement: includes diagonals
-        # Format: (dx, dy, cost)
+        # 8-connected movement with costs
         self.movements = [
-            (-1, -1, 1.414),  # Northwest diagonal
-            (-1,  0, 1.0),    # West
-            (-1,  1, 1.414),  # Southwest diagonal
-            ( 0, -1, 1.0),    # North
-            ( 0,  1, 1.0),    # South
-            ( 1, -1, 1.414),  # Northeast diagonal
-            ( 1,  0, 1.0),    # East
-            ( 1,  1, 1.414),  # Southeast diagonal
+            (-1, -1, 1.414), (-1,  0, 1.0), (-1,  1, 1.414),
+            ( 0, -1, 1.0),                   ( 0,  1, 1.0),
+            ( 1, -1, 1.414), ( 1,  0, 1.0), ( 1,  1, 1.414)
         ]
     
     def _create_inflated_obstacles(self) -> List[List[bool]]:
-        """
-        Create inflated obstacle map with safety margins
-        
-        Returns:
-            2D boolean array where True indicates inflated obstacle
-        """
-        # Initialize inflated map
+        """Create inflated obstacle map with safety margins"""
         inflated = [[False for _ in range(self.width)] for _ in range(self.height)]
         
-        # First pass: identify original obstacles
+        # Find original obstacles
         original_obstacles = []
         for y in range(self.height):
             for x in range(self.width):
                 if self._is_original_obstacle(x, y):
                     original_obstacles.append((x, y))
         
-        # Second pass: inflate around each obstacle
+        # Inflate around each obstacle
         for obs_x, obs_y in original_obstacles:
-            # Inflate in a square pattern around the obstacle
             for dy in range(-self.inflation_cells, self.inflation_cells + 1):
                 for dx in range(-self.inflation_cells, self.inflation_cells + 1):
                     new_x = obs_x + dx
                     new_y = obs_y + dy
                     
-                    # Check if within inflation radius (circular inflation)
                     distance = math.sqrt(dx*dx + dy*dy) * self.resolution
                     
                     if (distance <= self.inflation_radius and 
@@ -135,47 +106,28 @@ class AStarPlanner:
         return inflated
     
     def _is_original_obstacle(self, x: int, y: int) -> bool:
-        """
-        Check if a cell is an original obstacle (before inflation)
-        
-        Args:
-            x: Map grid x coordinate
-            y: Map grid y coordinate
-            
-        Returns:
-            True if cell is an original obstacle
-        """
+        """Check if cell is original obstacle (before inflation)"""
         if not self.is_valid_cell(x, y):
-            return True  # Out of bounds treated as obstacle
+            return True  # Out of bounds = obstacle
         
-        # Convert 2D coordinates to 1D array index
         index = y * self.width + x
         occupancy = self.grid.data[index]
         
-        # Check for obstacles: high occupancy, unknown (-1), or out of threshold
         return (occupancy >= self.obstacle_threshold or occupancy == -1)
     
     def _compute_distance_to_obstacles(self) -> List[List[float]]:
-        """
-        Compute distance from each cell to nearest original obstacle
-        
-        Returns:
-            2D array of distances to nearest obstacle
-        """
-        # Initialize distance map with large values
+        """Compute distance from each cell to nearest obstacle"""
         distances = [[float('inf') for _ in range(self.width)] for _ in range(self.height)]
-        
-        # Queue for BFS-style distance propagation
         queue = deque()
         
-        # Initialize distances for obstacle cells
+        # Initialize obstacle cells with zero distance
         for y in range(self.height):
             for x in range(self.width):
                 if self._is_original_obstacle(x, y):
                     distances[y][x] = 0.0
                     queue.append((x, y, 0.0))
         
-        # Propagate distances using BFS
+        # BFS distance propagation
         directions = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
         
         while queue:
@@ -185,7 +137,6 @@ class AStarPlanner:
                 new_x, new_y = x + dx, y + dy
                 
                 if self.is_valid_cell(new_x, new_y):
-                    # Calculate distance (accounting for diagonal movement)
                     move_dist = math.sqrt(dx*dx + dy*dy) * self.resolution
                     new_dist = current_dist + move_dist
                     
@@ -196,141 +147,62 @@ class AStarPlanner:
         return distances
     
     def world_to_map(self, world_x: float, world_y: float) -> Tuple[int, int]:
-        """
-        Convert world coordinates to map grid indices
-        
-        Args:
-            world_x: X coordinate in world frame
-            world_y: Y coordinate in world frame
-            
-        Returns:
-            Tuple of (map_x, map_y) indices
-        """
+        """Convert world coordinates to map grid indices"""
         map_x = int((world_x - self.origin_x) / self.resolution)
         map_y = int((world_y - self.origin_y) / self.resolution)
         return map_x, map_y
     
     def map_to_world(self, map_x: int, map_y: int) -> Tuple[float, float]:
-        """
-        Convert map grid indices to world coordinates
-        
-        Args:
-            map_x: X index in map grid
-            map_y: Y index in map grid
-            
-        Returns:
-            Tuple of (world_x, world_y) coordinates
-        """
+        """Convert map grid indices to world coordinates"""
         world_x = map_x * self.resolution + self.origin_x
         world_y = map_y * self.resolution + self.origin_y
         return world_x, world_y
     
     def is_valid_cell(self, x: int, y: int) -> bool:
-        """
-        Check if map cell coordinates are within grid bounds
-        
-        Args:
-            x: Map grid x coordinate
-            y: Map grid y coordinate
-            
-        Returns:
-            True if coordinates are valid, False otherwise
-        """
+        """Check if coordinates are within grid bounds"""
         return 0 <= x < self.width and 0 <= y < self.height
     
     def is_obstacle(self, x: int, y: int) -> bool:
-        """
-        Check if a grid cell is an obstacle (including inflated areas)
-        
-        Args:
-            x: Map grid x coordinate
-            y: Map grid y coordinate
-            
-        Returns:
-            True if cell is an obstacle or in inflated safety zone
-        """
+        """Check if cell is obstacle (including inflated areas)"""
         if not self.is_valid_cell(x, y):
-            return True  # Out of bounds treated as obstacle
+            return True  # Out of bounds = obstacle
         
-        # Check inflated obstacle map for safety
         return self.inflated_obstacles[y][x]
     
     def euclidean_heuristic(self, x1: int, y1: int, x2: int, y2: int) -> float:
-        """
-        Calculate Euclidean distance heuristic between two points
-        
-        Args:
-            x1, y1: First point coordinates
-            x2, y2: Second point coordinates
-            
-        Returns:
-            Euclidean distance
-        """
+        """Calculate Euclidean distance heuristic"""
         dx = x2 - x1
         dy = y2 - y1
         return math.sqrt(dx*dx + dy*dy)
     
     def get_neighbors(self, node: AStarNode) -> List[Tuple[int, int, float]]:
-        """
-        Generate valid neighbors for a node using 8-connected movement with proximity costs
-        
-        Args:
-            node: Current A* node
-            
-        Returns:
-            List of (x, y, cost) tuples for valid neighbors
-        """
+        """Generate valid neighbors with proximity costs"""
         neighbors = []
         
         for dx, dy, base_cost in self.movements:
             new_x = node.x + dx
             new_y = node.y + dy
             
-            # Check if neighbor is valid and not an obstacle
             if self.is_valid_cell(new_x, new_y) and not self.is_obstacle(new_x, new_y):
-                # Calculate proximity cost based on distance to obstacles
                 proximity_cost = self._calculate_proximity_cost(new_x, new_y)
                 total_cost = base_cost + proximity_cost
-                
                 neighbors.append((new_x, new_y, total_cost))
         
         return neighbors
     
     def _calculate_proximity_cost(self, x: int, y: int) -> float:
-        """
-        Calculate additional cost based on proximity to obstacles
-        
-        Args:
-            x: Grid x coordinate
-            y: Grid y coordinate
-            
-        Returns:
-            Additional cost penalty for being near obstacles
-        """
-        # Get distance to nearest obstacle
+        """Calculate cost penalty for proximity to obstacles"""
         distance_to_obstacle = self.distance_map[y][x]
         
-        # Apply exponential penalty for being close to obstacles
-        # Closer to obstacles = higher cost
         if distance_to_obstacle < self.inflation_radius:
-            # Normalize distance (0 = at obstacle, 1 = at inflation boundary)
             normalized_dist = distance_to_obstacle / self.inflation_radius
-            # Apply inverse exponential cost (closer = much more expensive)
             proximity_penalty = self.proximity_cost_weight * (1.0 - normalized_dist)**2
             return proximity_penalty
         
-        return 0.0  # No penalty if far from obstacles
+        return 0.0
     
     def reconstruct_path(self, goal_node: AStarNode) -> List[Tuple[int, int]]:
-        """
-        Reconstruct path from goal to start by following parent pointers
-        
-        Args:
-            goal_node: A* node representing the goal
-            
-        Returns:
-            List of (x, y) coordinates from start to goal
-        """
+        """Reconstruct path by following parent pointers"""
         path = []
         current = goal_node
         
@@ -338,33 +210,17 @@ class AStarPlanner:
             path.append((current.x, current.y))
             current = current.parent
         
-        # Reverse to get path from start to goal
         path.reverse()
         return path
     
     def plan_path(self, start_x: int, start_y: int, goal_x: int, goal_y: int) -> Optional[List[Tuple[int, int]]]:
-        """
-        Execute A* algorithm to find path from start to goal
+        """Execute A* algorithm to find path from start to goal"""
+        if self.is_obstacle(start_x, start_y) or self.is_obstacle(goal_x, goal_y):
+            return None
         
-        Args:
-            start_x, start_y: Start position in map coordinates
-            goal_x, goal_y: Goal position in map coordinates
-            
-        Returns:
-            List of (x, y) waypoints if path found, None if no path exists
-        """
-        # Validate start and goal positions
-        if self.is_obstacle(start_x, start_y):
-            return None  # Start position is in collision
+        open_list = []
+        closed_set: Set[Tuple[int, int]] = set()
         
-        if self.is_obstacle(goal_x, goal_y):
-            return None  # Goal position is in collision
-        
-        # Initialize A* data structures
-        open_list = []  # Priority queue of nodes to explore
-        closed_set: Set[Tuple[int, int]] = set()  # Set of explored nodes
-        
-        # Create start node
         start_node = AStarNode(
             x=start_x,
             y=start_y,
@@ -372,31 +228,22 @@ class AStarPlanner:
             h=self.euclidean_heuristic(start_x, start_y, goal_x, goal_y)
         )
         
-        # Add start node to open list
         heapq.heappush(open_list, start_node)
         
-        # A* main loop
         while open_list:
-            # Get node with lowest f cost
             current_node = heapq.heappop(open_list)
             
-            # Check if we reached the goal
             if current_node.x == goal_x and current_node.y == goal_y:
                 return self.reconstruct_path(current_node)
             
-            # Add current node to closed set
             closed_set.add((current_node.x, current_node.y))
             
-            # Explore neighbors
             for neighbor_x, neighbor_y, move_cost in self.get_neighbors(current_node):
-                # Skip if neighbor already explored
                 if (neighbor_x, neighbor_y) in closed_set:
                     continue
                 
-                # Calculate tentative g cost
                 tentative_g = current_node.g + move_cost
                 
-                # Create neighbor node
                 neighbor_node = AStarNode(
                     x=neighbor_x,
                     y=neighbor_y,
@@ -405,7 +252,6 @@ class AStarPlanner:
                     parent=current_node
                 )
                 
-                # Check if this path to neighbor is better
                 existing_node = None
                 for node in open_list:
                     if node.x == neighbor_x and node.y == neighbor_y:
@@ -413,78 +259,44 @@ class AStarPlanner:
                         break
                 
                 if existing_node is None:
-                    # New node, add to open list
                     heapq.heappush(open_list, neighbor_node)
                 elif tentative_g < existing_node.g:
-                    # Better path found, update existing node
                     existing_node.g = tentative_g
                     existing_node.f = existing_node.g + existing_node.h
                     existing_node.parent = current_node
         
-        # No path found
         return None
 
 
 class ObstacleAvoidanceNode(Node):
-    """
-    ROS2 Node for A* obstacle avoidance pathfinding with click-to-navigate
-    """
+    """ROS2 Node for A* pathfinding with click-to-navigate"""
     
     def __init__(self):
         super().__init__('obstacle_avoid')
         
-        # Data storage
         self.map_data: Optional[OccupancyGrid] = None
-        self.current_pose: Optional[Tuple[float, float]] = None  # Robot's current position from odometry
-        self.goal_queue = deque()  # FIFO queue of clicked goals
-        self.active_goal: Optional[Tuple[float, float]] = None  # Currently active goal
-        
-        # State management
+        self.current_pose: Optional[Tuple[float, float]] = None
+        self.goal_queue = deque()
+        self.active_goal: Optional[Tuple[float, float]] = None
         self.current_state = PlannerState.IDLE
         
         # Publishers
-        self.path_publisher = self.create_publisher(
-            Path,
-            '/a_star_path',
-            10
-        )
+        self.path_publisher = self.create_publisher(Path, '/a_star_path', 10)
         
         # Subscribers
-        self.map_sub = self.create_subscription(
-            OccupancyGrid,
-            '/map',
-            self.map_callback,
-            10
-        )
-        
-        self.odom_sub = self.create_subscription(
-            Odometry,
-            '/odom',
-            self.odom_callback,
-            10
-        )
-        
-        self.clicked_point_sub = self.create_subscription(
-            PointStamped,
-            '/clicked_point',
-            self.clicked_point_callback,
-            10
-        )
+        self.map_sub = self.create_subscription(OccupancyGrid, '/map', self.map_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        self.clicked_point_sub = self.create_subscription(PointStamped, '/clicked_point', self.clicked_point_callback, 10)
         
         # Timer for state machine updates
-        self.state_timer = self.create_timer(0.1, self.state_machine_update)  # 10 Hz update
+        self.state_timer = self.create_timer(0.1, self.state_machine_update)
         
         self.get_logger().info('A* Obstacle Avoidance Node initialized with click-to-navigate')
         self.get_logger().info('Waiting for /map and /odom messages...')
         self.get_logger().info('Click points in RViz to set navigation goals!')
     
     def map_callback(self, msg: OccupancyGrid):
-        """
-        Callback for occupancy grid map
-        
-        Args:
-            msg: OccupancyGrid message
-        """
+        """Callback for occupancy grid map"""
         self.map_data = msg
         self.get_logger().info(
             f'Received map: {msg.info.width}x{msg.info.height} '
@@ -492,29 +304,15 @@ class ObstacleAvoidanceNode(Node):
         )
     
     def odom_callback(self, msg: Odometry):
-        """
-        Callback for odometry data to track current robot pose
-        
-        Args:
-            msg: Odometry message from /odom topic
-        """
-        # Store current pose
+        """Callback for robot odometry data"""
         self.current_pose = (
             msg.pose.pose.position.x,
             msg.pose.pose.position.y
         )
     
     def clicked_point_callback(self, msg: PointStamped):
-        """
-        Callback for clicked points from RViz
-        
-        Args:
-            msg: PointStamped message from /clicked_point topic
-        """
-        # Extract goal coordinates
+        """Callback for clicked points - add goals to queue"""
         goal = (msg.point.x, msg.point.y)
-        
-        # Add to FIFO queue
         self.goal_queue.append(goal)
         
         self.get_logger().info(
@@ -523,16 +321,12 @@ class ObstacleAvoidanceNode(Node):
         )
     
     def state_machine_update(self):
-        """
-        Main state machine update loop for goal queue processing
-        """
+        """Main state machine update loop"""
         if self.current_state == PlannerState.IDLE:
-            # Check if we have goals to process and required data is available
             if (len(self.goal_queue) > 0 and 
                 self.current_pose is not None and 
                 self.map_data is not None):
                 
-                # Take first goal from queue
                 self.active_goal = self.goal_queue.popleft()
                 self.current_state = PlannerState.PLANNING
                 
@@ -546,7 +340,6 @@ class ObstacleAvoidanceNode(Node):
                 self.active_goal is not None and 
                 self.map_data is not None):
                 
-                # Execute A* planning and publish path
                 success = self.plan_and_publish_path()
                 
                 if success:
@@ -556,88 +349,65 @@ class ObstacleAvoidanceNode(Node):
                         f'({self.active_goal[0]:.2f}, {self.active_goal[1]:.2f})'
                     )
                 else:
-                    # Planning failed, return to idle
                     self.active_goal = None
                     self.current_state = PlannerState.IDLE
                     self.get_logger().warn('Planning failed. State: PLANNING -> IDLE')
                     
         elif self.current_state == PlannerState.WAITING_FOR_COMPLETION:
-            # Check if robot reached the goal (simplified check)
             if self.goal_reached():
                 self.active_goal = None
                 self.current_state = PlannerState.IDLE
                 
                 self.get_logger().info('Goal reached! State: WAITING -> IDLE')
                 
-                # Check if more goals are queued
                 if len(self.goal_queue) > 0:
                     self.get_logger().info(f'Processing next goal. Queue size: {len(self.goal_queue)}')
     
     def goal_reached(self) -> bool:
-        """
-        Check if the robot has reached the active goal
-        
-        Returns:
-            True if goal is reached, False otherwise
-        """
+        """Check if robot has reached the active goal"""
         if self.current_pose is None or self.active_goal is None:
             return False
             
-        # Calculate distance to goal
         dx = self.current_pose[0] - self.active_goal[0]
         dy = self.current_pose[1] - self.active_goal[1]
         distance = math.sqrt(dx*dx + dy*dy)
         
-        # Consider goal reached if within 0.3 meters
         return distance < 0.3
     
     def plan_and_publish_path(self) -> bool:
-        """
-        Execute A* pathfinding and publish the result
-        
-        Returns:
-            True if planning and publishing succeeded, False otherwise
-        """
+        """Execute A* pathfinding and publish result"""
         try:
-            # Create A* planner
             planner = AStarPlanner(self.map_data)
             
-            # Convert world coordinates to map coordinates
             start_map_x, start_map_y = planner.world_to_map(
-                self.current_pose[0],
-                self.current_pose[1]
+                self.current_pose[0], self.current_pose[1]
             )
-            
             goal_map_x, goal_map_y = planner.world_to_map(
-                self.active_goal[0],
-                self.active_goal[1]
+                self.active_goal[0], self.active_goal[1]
             )
             
             self.get_logger().info(
-                f'Planning A* path from current pose ({self.current_pose[0]:.2f}, {self.current_pose[1]:.2f}) '
-                f'to goal ({self.active_goal[0]:.2f}, {self.active_goal[1]:.2f})'
+                f'Planning A* path from ({self.current_pose[0]:.2f}, {self.current_pose[1]:.2f}) '
+                f'to ({self.active_goal[0]:.2f}, {self.active_goal[1]:.2f})'
             )
             
-            # Check for collision at start and goal
             if planner.is_obstacle(start_map_x, start_map_y):
-                self.get_logger().warn('Current robot pose is in collision! Skipping this goal.')
+                self.get_logger().warn('Current pose in collision! Skipping goal.')
                 self.publish_empty_path()
                 return False
             
             if planner.is_obstacle(goal_map_x, goal_map_y):
-                self.get_logger().warn('Goal pose is in collision! Skipping this goal.')
+                self.get_logger().warn('Goal pose in collision! Skipping goal.')
                 self.publish_empty_path()
                 return False
             
-            # Execute A* pathfinding
             path_map_coords = planner.plan_path(start_map_x, start_map_y, goal_map_x, goal_map_y)
             
             if path_map_coords is None:
-                self.get_logger().warn('No obstacle-free path found! Skipping this goal.')
+                self.get_logger().warn('No path found! Skipping goal.')
                 self.publish_empty_path()
                 return False
             
-            # Convert map coordinates back to world coordinates and publish
             self.publish_path(planner, path_map_coords)
             return True
             
@@ -647,18 +417,11 @@ class ObstacleAvoidanceNode(Node):
             return False
     
     def publish_path(self, planner: AStarPlanner, path_map_coords: List[Tuple[int, int]]):
-        """
-        Convert map path to world coordinates and publish as nav_msgs/Path
-        
-        Args:
-            planner: A* planner instance for coordinate conversion
-            path_map_coords: List of (x, y) waypoints in map coordinates
-        """
+        """Convert map coordinates to world and publish path"""
         path_msg = Path()
         path_msg.header.stamp = self.get_clock().now().to_msg()
         path_msg.header.frame_id = 'map'
         
-        # Convert each waypoint from map to world coordinates
         for map_x, map_y in path_map_coords:
             world_x, world_y = planner.map_to_world(map_x, map_y)
             
@@ -670,7 +433,6 @@ class ObstacleAvoidanceNode(Node):
             pose_stamped.pose.position.y = world_y
             pose_stamped.pose.position.z = 0.0
             
-            # Set neutral orientation
             pose_stamped.pose.orientation.x = 0.0
             pose_stamped.pose.orientation.y = 0.0
             pose_stamped.pose.orientation.z = 0.0
@@ -678,17 +440,14 @@ class ObstacleAvoidanceNode(Node):
             
             path_msg.poses.append(pose_stamped)
         
-        # Publish the path
         self.path_publisher.publish(path_msg)
         
         self.get_logger().info(
-            f'Successfully published A* path with {len(path_map_coords)} waypoints'
+            f'Published A* path with {len(path_map_coords)} waypoints'
         )
     
     def publish_empty_path(self):
-        """
-        Publish an empty path message to indicate no path found
-        """
+        """Publish empty path to indicate no path found"""
         empty_path = Path()
         empty_path.header.stamp = self.get_clock().now().to_msg()
         empty_path.header.frame_id = 'map'
@@ -698,7 +457,7 @@ class ObstacleAvoidanceNode(Node):
 
 
 def main(args=None):
-    """Main function to run the obstacle avoidance node"""
+    """Main function to run obstacle avoidance node"""
     rclpy.init(args=args)
     
     try:
@@ -706,8 +465,7 @@ def main(args=None):
         rclpy.spin(obstacle_avoid_node)
     except KeyboardInterrupt:
         pass
-    except Exception as e:
-        print(f'Error: {e}')
+
     finally:
         if rclpy.ok():
             rclpy.shutdown()

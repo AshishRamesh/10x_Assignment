@@ -51,6 +51,9 @@ The system generates smooth cubic spline trajectories from these discrete points
 
 **Output**: High-resolution path visualization showing original waypoints vs. smoothed trajectory.
 
+https://github.com/user-attachments/assets/165494e0-693a-4171-813b-d392dcd5c804
+<p align="center"><b>Hardcoded Waypoints Demo</b></p>
+
 <table>
 <tr>
 <td width="50%">
@@ -77,6 +80,9 @@ The `WaypointManager` node subscribes to `/clicked_point` messages, building a n
 
 **Output**: Dynamic trajectory generation and real-time robot movement following clicked waypoints.
 
+https://github.com/user-attachments/assets/ac689dd3-56ff-4feb-8cd6-cb5ef660e691
+<p align="center"><b>Interactive RViz Waypoints Demo</b></p>
+
 <table>
 <tr>
 <td width="50%">
@@ -102,6 +108,9 @@ Theis demo integrates A* pathfinding for collision-free navigation:
 The system uses the occupancy grid from `/map` to compute obstacle-free paths using A* search with safety inflation. The resulting grid-based path is then refined using the same smoothing pipeline for optimal robot motion.
 
 **Output**: Collision-free navigation with visualization of A* paths vs. smoothed trajectories.
+
+https://github.com/user-attachments/assets/efce912e-8231-47b3-8b2b-e338e6428267
+<p align="center"><b>Obstacle Avoidance Demo</b></p>
 
 <table>
 <tr>

@@ -1,4 +1,4 @@
-# Advanced ROS2 Navigation System: Path Smoothing, Trajectory Tracking & Obstacle Avoidance
+# Path Smoothing and Trajectory Control in 2D Space
 
 ## Introduction
 
@@ -11,17 +11,172 @@ The project demonstrates the complete pipeline from waypoint specification (eith
 ## Table of Contents
 
 - [Introduction](#introduction)
-- [Features](#features)
 - [Demo Overview](#demo-overview)
-- [System Architecture](#system-architecture)
-- [File Structure](#file-structure)
+- [Features](#features)
 - [Setup & Installation](#setup--installation)
 - [Running the System](#running-the-system)
+- [File Structure](#file-structure)
+- [System Architecture](#system-architecture)
 - [Algorithms & Design Choices](#algorithms--design-choices)
-- [Extending to a Real Robot](#extending-to-a-real-robot)
-- [Demonstration & Results](#demonstration--results)
-- [AI Tools Used](#ai-tools-used)
+- [Extending to a Real Robot](#extending-to-real-robot)
 - [Future Improvements](#future-improvements)
+
+---
+
+## Demo Overview
+
+<p align="center">
+  <img src="assets/turtlebot4.png" alt="TurtleBot4 Robot Platform" width="400">
+</p>
+<p align="center"><b>Fig: TurtleBot4 Robot Platform</b></p>
+
+<p align="center">
+  <img src="assets/maze_world.png" alt="Maze World Environment for Navigation Testing" width="800">
+</p>
+<p align="center"><b>Fig: Maze World Environment for Navigation Testing</b></p>
+
+### Demo 1 — Multi-Waypoint Path Smoothing
+This demonstration showcases the core path smoothing pipeline using predefined waypoints:
+
+**Waypoints**: `[(-2.75, -0.82), (-3.75, -0.1), (-3.80, 0.88), (-1.81, 0.88), (-1.71, -0.04)]`
+
+The system generates smooth cubic spline trajectories from these discrete points, creating 200 interpolated waypoints for continuous robot motion. The smoothing algorithm uses SciPy's parametric spline functions (`splprep`/`splev`) with automatic fallback to distance-based cubic splines for robustness.
+
+**Output**: High-resolution path visualization showing original waypoints vs. smoothed trajectory.
+
+<table>
+<tr>
+<td width="50%">
+<p align="center">
+  <img src="assets/hardcoded_path.png" alt="Hardcoded Waypoint Path Visualization" width="380" height="285" style="max-width: 380px; max-height: 285px; object-fit: contain;">
+</p>
+<p align="center"><b>Fig: Hardcoded Waypoint Path Visualization</b></p>
+</td>
+<td width="50%">
+<p align="center">
+  <img src="assets/hardcoded_graph.png" alt="Hardcoded Waypoint Performance Graph" width="380" height="285" style="max-width: 380px; max-height: 285px; object-fit: contain;">
+</p>
+<p align="center"><b>Fig: Hardcoded Waypoint Performance Graph</b></p>
+</td>
+</tr>
+</table>
+
+### Demo 2 — Interactive RViz Waypoint Selection  
+This demo enables real-time navigation goal specification through RViz interface:
+
+**Workflow**: User clicks points in RViz → goals queued in FIFO order → automatic path smoothing and execution
+
+The `WaypointManager` node subscribes to `/clicked_point` messages, building a navigation queue that's processed sequentially. Each goal triggers path smoothing from the robot's current position, enabling intuitive exploration and navigation.
+
+**Output**: Dynamic trajectory generation and real-time robot movement following clicked waypoints.
+
+<table>
+<tr>
+<td width="50%">
+<p align="center">
+  <img src="assets/interactive_path.png" alt="Interactive RViz Waypoint Path" width="380" height="285" style="max-width: 380px; max-height: 285px; object-fit: contain;">
+</p>
+<p align="center"><b>Fig: Interactive RViz Waypoint Path</b></p>
+</td>
+<td width="50%">
+<p align="center">
+  <img src="assets/interactive_graph.png" alt="Interactive Navigation Performance Graph" width="380" height="285" style="max-width: 380px; max-height: 285px; object-fit: contain;">
+</p>
+<p align="center"><b>Fig: Interactive Navigation Performance Graph</b></p>
+</td>
+</tr>
+</table>
+
+### Demo 3 — Obstacle Avoidance Navigation
+Theis demo integrates A* pathfinding for collision-free navigation:
+
+**Pipeline**: A* obstacle-free path generation → spline smoothing refinement → trajectory tracking execution
+
+The system uses the occupancy grid from `/map` to compute obstacle-free paths using A* search with safety inflation. The resulting grid-based path is then refined using the same smoothing pipeline for optimal robot motion.
+
+**Output**: Collision-free navigation with visualization of A* paths vs. smoothed trajectories.
+
+<table>
+<tr>
+<td width="50%">
+<p align="center">
+  <img src="assets/auto_nav_path.png" alt="Obstacle Avoidance Navigation Path" width="380" height="285" style="max-width: 380px; max-height: 285px; object-fit: contain;">
+</p>
+<p align="center"><b>Fig: Obstacle Avoidance Navigation Path</b></p>
+</td>
+<td width="50%">
+<p align="center">
+  <img src="assets/auto_nav_graph.png" alt="Obstacle Avoidance Performance Graph" width="380" height="285" style="max-width: 380px; max-height: 285px; object-fit: contain;">
+</p>
+<p align="center"><b>Fig: Obstacle Avoidance Performance Graph</b></p>
+</td>
+</tr>
+</table>
+
+### Visualization Examples
+```
+visualization_output/
+├── path_visualization_YYYYMMDD_HHMMSS.png    # Combined path plots
+└── tracking_error_YYYYMMDD_HHMMSS.png        # Error analysis graphs
+```
+
+## Demonstration & Results
+
+### Path Smoothing Visualization
+
+**Comparison Analysis**: Original waypoints vs. smoothed trajectories
+
+The path smoothing visualization demonstrates the transformation from discrete waypoints to continuous, differentiable paths suitable for robot navigation.
+
+**Key Metrics**:
+- **Input**: 5 discrete waypoints  
+- **Output**: 200 interpolated path points
+- **Smoothness**: C² continuous (smooth acceleration)
+- **Path Length**: Optimized between waypoint accuracy and path efficiency
+
+**Generated Visualizations**:
+```
+visualization_output/
+├── path_visualization_YYYYMMDD_HHMMSS.png
+└── Multi-waypoint comparison with original vs smoothed paths
+```
+
+### Trajectory Tracking Performance
+
+**Tracking Analysis**: Generated trajectory vs. executed path
+
+The trajectory tracking results demonstrate Pure Pursuit controller performance with quantitative error metrics.
+
+**Performance Metrics**:
+- **Lateral Error**: RMS deviation from reference path
+- **Heading Error**: Angular deviation from desired orientation  
+- **Convergence Time**: Time to reach steady-state tracking
+- **Goal Accuracy**: Final position error at waypoint arrival
+
+**Generated Analysis**:
+```
+visualization_output/
+├── tracking_error_YYYYMMDD_HHMMSS.png
+└── Error plots with statistical analysis (mean, RMS, max deviation)
+```
+
+### Obstacle Avoidance Validation
+
+**Navigation Analysis**: A* path vs. smoothed path vs. executed trajectory
+
+The obstacle avoidance validation shows the complete pipeline from grid-based planning to smooth execution.
+
+**Collision Metrics**:
+- **Safety Distance**: Minimum distance to obstacles during execution
+- **Path Efficiency**: Smoothed path length vs. A* path length  
+- **Planning Time**: Computational performance for real-time operation
+- **Success Rate**: Collision-free navigation completion percentage
+
+**Sample Results**:
+- A* Path Length: 12.3m (grid-based)
+- Smoothed Path Length: 11.8m (optimized)  
+- Execution Path Length: 12.1m (actual robot motion)
+- Minimum Obstacle Distance: 0.62m (exceeds 0.5m safety requirement)
 
 ---
 
@@ -44,41 +199,153 @@ The project demonstrates the complete pipeline from waypoint specification (eith
 
 ---
 
-## Demo Overview
+## Setup & Installation
 
-### Demo 1 — Multi-Waypoint Path Smoothing
-This demonstration showcases the core path smoothing pipeline using predefined waypoints:
+### Prerequisites
+- **ROS2 Humble** (Ubuntu 22.04 recommended)
+- **Gazebo Ignition** for simulation
+- **Git** for cloning the repository
 
-**Waypoints**: `[(0.0, 0.0), (1.0, 0.5), (2.0, 1.0), (2.5, 0.5), (3.0, 0.0)]`
+### Automated Installation (Recommended)
 
-The system generates smooth cubic spline trajectories from these discrete points, creating 150 interpolated waypoints for continuous robot motion. The smoothing algorithm uses SciPy's parametric spline functions (`splprep`/`splev`) with automatic fallback to distance-based cubic splines for robustness.
-
-**Output**: High-resolution path visualization showing original waypoints vs. smoothed trajectory.
-
-### Demo 2 — Interactive RViz Waypoint Selection  
-This demo enables real-time navigation goal specification through RViz interface:
-
-**Workflow**: User clicks points in RViz → goals queued in FIFO order → automatic path smoothing and execution
-
-The `WaypointManager` node subscribes to `/clicked_point` messages, building a navigation queue that's processed sequentially. Each goal triggers path smoothing from the robot's current position, enabling intuitive exploration and navigation.
-
-**Output**: Dynamic trajectory generation and real-time robot movement following clicked waypoints.
-
-### Demo 3 — Obstacle Avoidance Navigation
-The most advanced demo integrates A* pathfinding for collision-free navigation:
-
-**Pipeline**: A* obstacle-free path generation → spline smoothing refinement → trajectory tracking execution
-
-The system uses the occupancy grid from `/map` to compute obstacle-free paths using A* search with safety inflation. The resulting grid-based path is then refined using the same smoothing pipeline for optimal robot motion.
-
-**Output**: Collision-free navigation with visualization of A* paths vs. smoothed trajectories.
-
-### Visualization Examples
+1. **Clone the repository into your ROS2 workspace:**
+```bash
+cd ~/10x_Assignment
+git clone https://github.com/AshishRamesh/10x_Assignment
 ```
-visualization_output/
-├── path_visualization_YYYYMMDD_HHMMSS.png    # Combined path plots
-└── tracking_error_YYYYMMDD_HHMMSS.png        # Error analysis graphs
+
+2. **Run the automated setup script:**
+```bash
+./dev/setup.sh
 ```
+
+The script will automatically:
+- Install Python dependencies (NumPy, SciPy, Matplotlib)
+- Install TurtleBot4 simulation packages
+- Install additional ROS2 navigation packages
+- Build the workspace with colcon
+- Provide next steps for verification
+
+### Manual Installation (Alternative)
+
+If you prefer manual installation:
+
+1. **Clone the repository:**
+```bash
+cd ~/10x_Assignment
+git clone https://github.com/AshishRamesh/10x_Assignment
+```
+
+2. **Install system dependencies:**
+```bash
+sudo apt update
+sudo apt install python3-numpy python3-scipy python3-matplotlib
+sudo apt install ignition-gazebo6 ros-humble-ros-ign-gazebo
+sudo apt install ros-humble-turtlebot4-simulator ros-humble-irobot-create-nodes
+```
+
+3. **Build the workspace:**
+```bash
+cd ~/ros2_ws
+colcon build --symlink-install
+```
+
+4. **Source the workspace:**
+```bash
+source install/setup.bash
+```
+
+### Verify Installation
+```bash
+ros2 pkg list | grep bot_ctrl
+ros2 interface list | grep nav_msgs
+```
+
+---
+
+## Running the System
+
+### 1. Start TurtleBot4 Simulation + Map
+
+Ensure the following commands are run at the root of the workspace:
+Example:
+If your workspace is '10x_Assignment', run the commands from there after sourcing the workspace.
+
+```bash
+# Terminal 1: Start TurtleBot4 simulation with mapping
+ros2 launch turtlebot4_ignition_bringup turtlebot4_ignition.launch.py rviz:=true world:=maze localization:=true map:="src/bot_ctrl/maps/maze_map.yaml"
+```
+
+### 2. Launch Navigation System
+
+Choose one of the following launch configurations:
+
+#### Complete Obstacle Avoidance System
+```bash
+# Terminal 2: Full system with A* planning
+ros2 launch bot_ctrl obstacle_avoidance_launch.py
+```
+
+#### Interactive RViz Navigation
+```bash  
+# Terminal 2: Click-to-navigate system
+ros2 launch bot_ctrl clicked_waypoints_launch.py
+```
+
+#### Hardcoded Waypoint Navigation
+```bash
+# Terminal 2: Static waypoint following
+ros2 launch bot_ctrl hardcoded_waypoints_launch.py
+```
+
+### 3. Using RViz for Interactive Navigation and Obstacle Avoidance
+
+   - Select "Publish Point" tool
+   - Click desired locations on the map
+   - Robot automatically navigates to clicked points in sequence
+
+---
+
+## File Structure
+
+```
+10x_Assignment/
+├── src/bot_ctrl/                       # ROS2 package source
+│   ├── bot_ctrl/
+│   │   ├── obstacle_avoid.py           # A* pathfinding implementation
+│   │   ├── smoother_obstacle.py        # A* path smoothing  
+│   │   ├── smoother_clicked.py         # Click-based waypoint manager
+│   │   ├── smoother.py                 # Hardcoded waypoint smoother
+│   │   ├── planner.py                  # Trajectory generator
+│   │   ├── controller.py               # Pure Pursuit tracker
+│   │   └── visualizer.py               # Path visualization tools
+│   ├── launch/
+│   │   ├── obstacle_avoidance_launch.py # Complete obstacle avoidance system
+│   │   ├── clicked_waypoints_launch.py  # Interactive RViz navigation  
+│   │   ├── hardcoded_waypoints_launch.py # Static waypoint navigation
+│   │   └── visualization_launch.py     # Visualization-only mode
+│   └── maps/
+│       ├── maze_map.pgm                # Maze world occupancy grid data
+│       └── maze_map.yaml               # Map metadata and configuration
+├── dev/                                # Development tools
+│   └── setup.sh                        # Automated installation script
+├── assets/                             # Documentation images
+├── visualization_output/               # Generated analysis plots
+├── build/                              # Colcon build artifacts
+├── install/                            # Installed packages
+└── log/                                # Build logs
+```
+
+### Node Responsibilities
+
+| Node | Purpose | Topics | Key Features |
+|------|---------|---------|--------------|
+| `obstacle_avoid` | A* pathfinding | `/clicked_point` → `/a_star_path` | Grid-based planning, safety inflation |
+| `smoother_obstacle` | Path refinement | `/a_star_path` → `/smooth_path` | Spline smoothing of A* output |
+| `waypoint_manager` | Interactive navigation | `/clicked_point` → `/smooth_path` | Click-to-navigate, goal queueing |
+| `planner` | Trajectory generation | `/smooth_path` → `/trajectory` | Time parameterization, orientation |
+| `controller` | Motion control | `/trajectory` + `/odom` → `/cmd_vel` | Pure Pursuit, lookahead control |
+| `visualizer` | System monitoring | Multiple → PNG files | Error analysis, performance metrics |
 
 ---
 
@@ -145,149 +412,6 @@ The system handles multiple coordinate frames through TF2 transformations:
 - **`/map`**: Global planning frame for obstacle avoidance
 - **`/odom`**: Odometry frame for trajectory tracking
 - **`/base_link`**: Robot body frame for control commands
-
----
-
-## File Structure
-
-```
-src/bot_ctrl/
-├── launch/
-│   ├── obstacle_avoidance_launch.py    # Complete obstacle avoidance system
-│   ├── clicked_waypoints_launch.py     # Interactive RViz navigation  
-│   ├── hardcoded_waypoints_launch.py   # Static waypoint navigation
-│   └── visualization_launch.py         # Visualization-only mode
-├── bot_ctrl/
-│   ├── obstacle_avoid.py               # A* pathfinding implementation
-│   ├── smoother_obstacle.py            # A* path smoothing  
-│   ├── smoother_clicked.py             # Click-based waypoint manager
-│   ├── smoother.py                     # Hardcoded waypoint smoother
-│   ├── planner.py                      # Trajectory generator
-│   ├── controller.py                   # Pure Pursuit tracker
-│   └── visualizer.py                   # Path visualization tools
-├── maps/                               # Map files for simulation
-├── config/                             # Configuration files
-├── rviz/                              # RViz configuration files
-├── package.xml                         # ROS2 package manifest
-├── setup.py                           # Python package setup
-└── README.md                          # Package documentation
-```
-
-### Node Responsibilities
-
-| Node | Purpose | Topics | Key Features |
-|------|---------|---------|--------------|
-| `obstacle_avoid` | A* pathfinding | `/clicked_point` → `/a_star_path` | Grid-based planning, safety inflation |
-| `smoother_obstacle` | Path refinement | `/a_star_path` → `/smooth_path` | Spline smoothing of A* output |
-| `waypoint_manager` | Interactive navigation | `/clicked_point` → `/smooth_path` | Click-to-navigate, goal queueing |
-| `planner` | Trajectory generation | `/smooth_path` → `/trajectory` | Time parameterization, orientation |
-| `controller` | Motion control | `/trajectory` + `/odom` → `/cmd_vel` | Pure Pursuit, lookahead control |
-| `visualizer` | System monitoring | Multiple → PNG files | Error analysis, performance metrics |
-
----
-
-## Setup & Installation
-
-### Prerequisites
-- **ROS2 Humble** (Ubuntu 22.04 recommended)
-- **TurtleBot4 packages** for simulation
-- **Python dependencies**: NumPy, SciPy, Matplotlib
-
-### Installation Steps
-
-1. **Clone the repository into your ROS2 workspace:**
-```bash
-cd ~/ros2_ws/src
-git clone <repository_url> bot_ctrl
-```
-
-2. **Install system dependencies:**
-```bash
-sudo apt update
-sudo apt install python3-numpy python3-scipy python3-matplotlib
-sudo apt install ros-humble-turtlebot4-simulator ros-humble-turtlebot4-desktop
-```
-
-3. **Build the workspace:**
-```bash
-cd ~/ros2_ws
-colcon build --symlink-install
-```
-
-4. **Source the workspace:**
-```bash
-source install/setup.bash
-```
-
-### Verify Installation
-```bash
-ros2 pkg list | grep bot_ctrl
-ros2 interface list | grep nav_msgs
-```
-
----
-
-## Running the System
-
-### 1. Start TurtleBot4 Simulation + Map
-
-For obstacle avoidance demos, first launch the simulation with a map:
-
-```bash
-# Terminal 1: Start TurtleBot4 simulation with mapping
-ros2 launch turtlebot4_ignition_bringup turtlebot4_ignition.launch.py slam:=true
-```
-
-### 2. Launch Navigation System
-
-Choose one of the following launch configurations:
-
-#### Complete Obstacle Avoidance System
-```bash
-# Terminal 2: Full system with A* planning
-ros2 launch bot_ctrl obstacle_avoidance_launch.py
-```
-
-#### Interactive RViz Navigation
-```bash  
-# Terminal 2: Click-to-navigate system
-ros2 launch bot_ctrl clicked_waypoints_launch.py
-```
-
-#### Hardcoded Waypoint Navigation
-```bash
-# Terminal 2: Static waypoint following
-ros2 launch bot_ctrl hardcoded_waypoints_launch.py
-```
-
-### 3. Using RViz for Interactive Navigation
-
-1. **Open RViz2:**
-```bash
-# Terminal 3: Launch RViz
-rviz2
-```
-
-2. **Configure RViz for waypoint selection:**
-   - Add → By display type → `Map` (topic: `/map`)
-   - Add → By display type → `Path` (topic: `/smooth_path`)  
-   - Add → By display type → `Path` (topic: `/trajectory`)
-   - Tools → `Publish Point` → Set topic to `/clicked_point`
-
-3. **Navigate by clicking:**
-   - Select "Publish Point" tool
-   - Click desired locations on the map
-   - Robot automatically navigates to clicked points in sequence
-
-### 4. Switching Operation Modes
-
-The system supports multiple operation modes controlled via ROS parameters:
-
-```bash
-# Enable/disable specific planning modes
-ros2 param set /waypoint_manager use_clicked_points true
-ros2 param set /obstacle_avoid enable_planning true
-```
 
 ---
 
@@ -432,96 +556,6 @@ def laser_callback(self, scan_msg):
 - Reduce path planning frequency (1-2Hz vs continuous)
 - Implement path caching and incremental updates
 - Use multi-threading for sensor processing and control
-
----
-
-## Demonstration & Results
-
-### 11.1 Path Smoothing Visualization
-
-**Comparison Analysis**: Original waypoints vs. smoothed trajectories
-
-The path smoothing visualization demonstrates the transformation from discrete waypoints to continuous, differentiable paths suitable for robot navigation.
-
-**Key Metrics**:
-- **Input**: 5 discrete waypoints  
-- **Output**: 150 interpolated path points
-- **Smoothness**: C² continuous (smooth acceleration)
-- **Path Length**: Optimized between waypoint accuracy and path efficiency
-
-**Generated Visualizations**:
-```
-visualization_output/
-├── path_visualization_YYYYMMDD_HHMMSS.png
-└── Multi-waypoint comparison with original vs smoothed paths
-```
-
-### 11.2 Trajectory Tracking Performance
-
-**Tracking Analysis**: Generated trajectory vs. executed path
-
-The trajectory tracking results demonstrate Pure Pursuit controller performance with quantitative error metrics.
-
-**Performance Metrics**:
-- **Lateral Error**: RMS deviation from reference path
-- **Heading Error**: Angular deviation from desired orientation  
-- **Convergence Time**: Time to reach steady-state tracking
-- **Goal Accuracy**: Final position error at waypoint arrival
-
-**Generated Analysis**:
-```
-visualization_output/
-├── tracking_error_YYYYMMDD_HHMMSS.png
-└── Error plots with statistical analysis (mean, RMS, max deviation)
-```
-
-### 11.3 Obstacle Avoidance Validation
-
-**Navigation Analysis**: A* path vs. smoothed path vs. executed trajectory
-
-The obstacle avoidance validation shows the complete pipeline from grid-based planning to smooth execution.
-
-**Collision Metrics**:
-- **Safety Distance**: Minimum distance to obstacles during execution
-- **Path Efficiency**: Smoothed path length vs. A* path length  
-- **Planning Time**: Computational performance for real-time operation
-- **Success Rate**: Collision-free navigation completion percentage
-
-**Sample Results**:
-- A* Path Length: 12.3m (grid-based)
-- Smoothed Path Length: 11.8m (optimized)  
-- Execution Path Length: 12.1m (actual robot motion)
-- Minimum Obstacle Distance: 0.62m (exceeds 0.5m safety requirement)
-
----
-
-## AI Tools Used
-
-### Development Assistance Tools
-
-**GitHub Copilot**: 
-- Code generation for ROS2 node structure and boilerplate
-- Algorithm implementation assistance for A* search and spline interpolation
-- Debugging support for TF2 transforms and message handling
-
-**ChatGPT/Claude**: 
-- Architecture design discussions and algorithm selection
-- Debugging complex multi-node communication issues
-- Documentation and comment generation
-- Mathematical formulation verification for Pure Pursuit controller
-
-**Additional Tools**:
-- **VS Code IntelliSense**: Real-time code completion and error detection
-- **ROS2 Documentation**: Official API references and best practices
-- **SciPy Documentation**: Mathematical algorithm implementation details
-
-### AI-Assisted Development Workflow
-
-1. **Architecture Planning**: AI-guided system design and component interaction
-2. **Code Implementation**: Copilot-assisted rapid prototyping and implementation  
-3. **Debugging**: AI-powered error analysis and solution suggestions
-4. **Documentation**: Automated comment generation and README structuring
-5. **Testing**: AI-suggested test cases and validation scenarios
 
 ---
 
